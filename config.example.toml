@@ -1,0 +1,29 @@
+# warpd-rs configuration
+# Place at: ~/.config/warpd-rs/config.toml
+
+# Characters used for hint labels — order matters.
+# With 26 chars you get 26 single-char + 676 two-char labels = 702 hints.
+# Dvorak home-row example:
+# hint_chars = "aoeuidhtns"
+hint_chars = "abcdefghijklmnopqrstuvwxyz"
+
+# -- Hint mode visuals (Catppuccin Mocha defaults) --
+hint_bgcolor   = "#1e1e2e"
+hint_fgcolor   = "#cdd6f4"
+hint_border_radius = 4.0
+hint_font      = "monospace"
+hint_font_size = 16.0
+hint_grid_gap  = 80          # pixels between hint centres
+
+# -- Grid mode --
+grid_color       = "#89b4fa"
+grid_border_size = 2
+grid_min_size    = 270.0       # auto-select when both width/height are below this
+
+# -- Normal mode --
+speed        = 420           # pixels/sec base speed
+acceleration = 700           # unused for now, reserved
+
+# -- Cursor indicator (normal mode) --
+cursor_color = "#f38ba8"
+cursor_size  = 9
