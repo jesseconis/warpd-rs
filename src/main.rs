@@ -22,7 +22,6 @@ use clap::Parser;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use wayland::KeyState;
-use wayland_client::protocol::wl_output;
 
 // ---------------------------------------------------------------------------
 // CLI

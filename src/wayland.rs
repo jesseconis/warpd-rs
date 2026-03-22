@@ -15,7 +15,7 @@ use wayland_client::protocol::{
     wl_shm_pool, wl_surface,
 };
 use wayland_client::{
-    globals::{registry_queue_init, GlobalList, GlobalListContents},
+    globals::{registry_queue_init, GlobalListContents},
     Connection, Dispatch, EventQueue, QueueHandle,
 };
 use wayland_protocols::xdg::xdg_output::zv1::client::{
@@ -26,9 +26,6 @@ use wayland_protocols_wlr::layer_shell::v1::client::{
 };
 use wayland_protocols_wlr::virtual_pointer::v1::client::{
     zwlr_virtual_pointer_manager_v1, zwlr_virtual_pointer_v1,
-};
-use wayland_protocols::wp::relative_pointer::zv1::client::{
-    zwp_relative_pointer_manager_v1, zwp_relative_pointer_v1,   
 };
 
 // Re-exports for use by other modules
@@ -809,7 +806,7 @@ pub fn create_overlay(
     let qh = queue.handle();
     let compositor = state.compositor.as_ref().unwrap();
     let layer_shell = state.layer_shell.as_ref().unwrap();
-    let shm = state.shm.as_ref().unwrap();
+    let _shm = state.shm.as_ref().unwrap();
 
     let surface = compositor.create_surface(&qh, ());
     let layer_surface = layer_shell.get_layer_surface(
