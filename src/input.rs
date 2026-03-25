@@ -1,10 +1,8 @@
 ///! Input helpers: key-name lookup, modifier detection, convenience wrappers
 ///! around the raw KeyEvent coming from the Wayland keyboard dispatch.
 
-use crate::wayland::KeyEvent;
-use wayland_client::protocol::wl_keyboard::KeyState;
-
 /// Well-known XKB keysyms used throughout the mode loops.
+#[allow(dead_code)]
 pub mod keysyms {
     pub const ESCAPE: u32 = 0xff1b;
     pub const RETURN: u32 = 0xff0d;
@@ -32,19 +30,3 @@ pub mod keysyms {
     pub const V: u32 = 0x76; // drag toggle
 }
 
-/// Returns true if this is a key-down event.
-pub fn is_press(event: &KeyEvent) -> bool {
-    event.state == KeyState::Pressed
-}
-
-/// Try to get a single lowercase ASCII character from the event.
-pub fn to_char(event: &KeyEvent) -> Option<char> {
-    event.utf8.as_ref().and_then(|s| {
-        let mut chars = s.chars();
-        let c = chars.next()?;
-        if chars.next().is_some() {
-            return None; // multi-char
-        }
-        Some(c.to_ascii_lowercase())
-    })
-}

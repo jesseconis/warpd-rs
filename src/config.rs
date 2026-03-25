@@ -7,10 +7,14 @@ use std::path::PathBuf;
 #[serde(default)]
 pub struct Config {
     // -- Hint mode visuals --
+    /// Source of hint targets: "grid", "stdin", or "detect".
+    pub hint_source: String,
     /// Characters used to generate hint labels (order matters).
     pub hint_chars: String,
     /// Background colour of hint boxes (CSS hex).
     pub hint_bgcolor: String,
+    /// Opacity multiplier for hint background fill (0.0..1.0).
+    pub hint_bg_opacity: f64,
     /// Foreground / text colour of hint boxes.
     pub hint_fgcolor: String,
     /// Border radius in pixels for hint rounded-rect.
@@ -43,8 +47,10 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            hint_source: "grid".into(),
             hint_chars: "abcdefghijklmnopqrstuvwxyz".into(),
             hint_bgcolor: "#1e1e2e".into(),
+            hint_bg_opacity: 1.0,
             hint_fgcolor: "#cdd6f4".into(),
             hint_border_radius: 4.0,
             hint_font: "monospace".into(),

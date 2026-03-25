@@ -6,6 +6,7 @@ use crate::config::{self, Config};
 use crate::wayland::{KeyEvent, KeyState, Monitor, Overlay};
 
 use anyhow::Result;
+use std::io::{self, BufRead, IsTerminal};
 
 // ---------------------------------------------------------------------------
 // Data types
@@ -22,6 +23,15 @@ pub struct Hint {
     pub h: i32,
     /// The label the user must type to select this hint (e.g. "aj").
     pub label: String,
+}
+
+/// Arbitrary target area in monitor-local coordinates.
+#[derive(Debug, Clone)]
+pub struct TargetArea {
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
 }
 
 /// Result of processing a key press during hint mode.
@@ -100,6 +110,105 @@ pub fn generate_hints(monitor: &Monitor, config: &Config) -> Vec<Hint> {
     hints
 }
 
+/// Parse one `wxh+x+y` line.
+fn parse_area_line(line: &str) -> Option<TargetArea> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let x_pos = trimmed.find('x')?;
+    let plus1 = trimmed[x_pos + 1..].find('+')? + x_pos + 1;
+    let plus2 = trimmed[plus1 + 1..].find('+')? + plus1 + 1;
+
+    let w = trimmed[..x_pos].parse::<i32>().ok()?;
+    let h = trimmed[x_pos + 1..plus1].parse::<i32>().ok()?;
+    let x = trimmed[plus1 + 1..plus2].parse::<i32>().ok()?;
+    let y = trimmed[plus2 + 1..].parse::<i32>().ok()?;
+
+    if w <= 0 || h <= 0 {
+        return None;
+    }
+
+    Some(TargetArea { x, y, w, h })
+}
+
+/// Read `wxh+x+y` areas from stdin.
+pub fn read_target_areas_from_stdin() -> Result<Vec<TargetArea>> {
+    if io::stdin().is_terminal() {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::new();
+    for line in io::stdin().lock().lines() {
+        let line = line?;
+        if let Some(area) = parse_area_line(&line) {
+            out.push(area);
+        }
+    }
+    Ok(out)
+}
+
+/// Convert global areas into monitor-local, clipped areas.
+pub fn normalize_areas_for_monitor(
+    monitor: &Monitor,
+    areas: &[TargetArea],
+) -> Vec<TargetArea> {
+    let mut out = Vec::new();
+    let mon_l = monitor.x;
+    let mon_t = monitor.y;
+    let mon_r = monitor.x + monitor.width;
+    let mon_b = monitor.y + monitor.height;
+
+    for area in areas {
+        let l = area.x.max(mon_l);
+        let t = area.y.max(mon_t);
+        let r = (area.x + area.w).min(mon_r);
+        let b = (area.y + area.h).min(mon_b);
+
+        let w = r - l;
+        let h = b - t;
+        if w <= 0 || h <= 0 {
+            continue;
+        }
+
+        out.push(TargetArea {
+            x: l - mon_l,
+            y: t - mon_t,
+            w,
+            h,
+        });
+    }
+
+    out
+}
+
+/// Build hint labels for arbitrary rectangles.
+pub fn generate_hints_from_areas(config: &Config, areas: &[TargetArea]) -> Vec<Hint> {
+    let labels = generate_labels(&config.hint_chars, areas.len());
+    let min_w = (config.hint_font_size * 2.2).round() as i32;
+    let min_h = (config.hint_font_size * 1.6).round() as i32;
+
+    areas
+        .iter()
+        .zip(labels)
+        .map(|(area, label)| {
+            let cx = area.x + area.w / 2;
+            let cy = area.y + area.h / 2;
+            let w = area.w.max(min_w);
+            let h = area.h.max(min_h);
+
+            Hint {
+                x: cx - w / 2,
+                y: cy - h / 2,
+                w,
+                h,
+                label,
+            }
+        })
+        .collect()
+}
+
 // ---------------------------------------------------------------------------
 // Drawing
 // ---------------------------------------------------------------------------
@@ -137,6 +246,7 @@ pub fn draw_hints(
     // Parse colours
     let (bg_r, bg_g, bg_b, bg_a) = config::parse_hex_color(&config.hint_bgcolor);
     let (fg_r, fg_g, fg_b, _) = config::parse_hex_color(&config.hint_fgcolor);
+    let bg_alpha = (bg_a * config.hint_bg_opacity).clamp(0.0, 1.0);
 
     cr.set_operator(cairo::Operator::Over);
 
@@ -168,7 +278,7 @@ pub fn draw_hints(
         cr.arc(x + radius, y + h - radius, radius, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
         cr.arc(x + radius, y + radius, radius, std::f64::consts::PI, 3.0 * std::f64::consts::FRAC_PI_2);
         cr.close_path();
-        cr.set_source_rgba(bg_r, bg_g, bg_b, bg_a);
+        cr.set_source_rgba(bg_r, bg_g, bg_b, bg_alpha);
         cr.fill()?;
 
         // --- Label text ---

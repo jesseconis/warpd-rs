@@ -6,35 +6,29 @@ Inspired by [warpd](https://github.com/rvaiya/warpd) — this is a
 Wayland-first implementation that targets wlroots-based compositors
 (Sway, Hyprland, etc.).
 
-## Features
+## Modes
 
 - **Hint mode** — screen fills with labelled targets; type to warp instantly
 - **Grid mode** — recursive quadrant subdivision (u/i/j/k) for precise positioning
 - **Normal mode** — hjkl continuous cursor movement with crosshair overlay
-- First-class Wayland support via wlroots protocols
-- Cairo-based overlay rendering with configurable colours and fonts
-- XKB keyboard handling
-- TOML configuration file
 
-## Dependencies
+## Install
 
 System libraries (install via your package manager):
 
-```
-# Arch
+```bash
+# arch 
 sudo pacman -S wayland cairo pango libxkbcommon
+```
+
+For floating target auto-detection (`hint_source = "detect"`), OpenCV is also required:
+
+```bash
+# Arch
+sudo pacman -S opencv
 
 # Debian/Ubuntu
-sudo apt install libwayland-dev libcairo2-dev libxkbcommon-dev
-
-# Fedora
-sudo dnf install wayland-devel cairo-devel libxkbcommon-devel
-```
-
-Rust toolchain (1.70+):
-
-```
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+sudo apt install libopencv-dev
 ```
 
 ## Build
@@ -43,7 +37,11 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 cargo build --release
 ```
 
-The binary will be at `target/release/warpd-rs`.
+With auto-detection support:
+
+```bash
+cargo build --release --features opencv
+```
 
 ## Usage
 
@@ -55,7 +53,40 @@ warpd on Wayland).
 warpd-rs --hint      # hint mode
 warpd-rs --grid      # grid mode
 warpd-rs --normal    # normal (discrete) mode
+warpd-rs --version   # print version and compiled runtime features
 warpd-rs --hint --config ./config.example.toml
+```
+
+`--version` prints feature support, for example:
+
+```text
+warpd-rs 0.1.0 (opencv)
+```
+
+If OpenCV support is not compiled in, it prints:
+
+```text
+warpd-rs 0.1.0 (none)
+```
+
+### Target Detection Invocation
+
+1. Build with OpenCV support:
+
+```bash
+cargo build --release --features opencv
+```
+
+2. Set detection mode in config (for example in `~/.config/warpd-rs/config.toml`):
+
+```toml
+hint_source = "detect"
+```
+
+3. Run hint mode:
+
+```bash
+./target/release/warpd-rs --hint
 ```
 
 ### Hyprland
@@ -66,13 +97,7 @@ bind = SUPER ALT, g, exec, warpd-rs --grid
 bind = SUPER ALT, c, exec, warpd-rs --normal
 ```
 
-### Sway
-
-```ini
-bindsym Mod4+Mod1+x exec warpd-rs --hint
-bindsym Mod4+Mod1+g exec warpd-rs --grid
-bindsym Mod4+Mod1+c exec warpd-rs --normal
-```
+# Usage
 
 ## Modes
 
@@ -82,6 +107,14 @@ bindsym Mod4+Mod1+c exec warpd-rs --normal
 2. Type characters to filter — matching prefix is dimmed, remaining chars highlighted
 3. When one hint remains the cursor warps to its centre
 4. Press **Escape** to cancel, **Backspace** to undo a character
+
+Hint targets are selected by `hint_source`:
+
+- `grid` (default): regular grid-based hints across the monitor
+- `stdin`: read target areas from stdin, one `wxh+x+y` rectangle per line
+- `detect`: run OpenCV-based target detection on a screencopy frame (requires
+   building with `--features opencv` and compositor support for
+   `wlr-screencopy-unstable-v1`)
 
 ### Grid Mode (`--grid`)
 
@@ -102,45 +135,16 @@ bindsym Mod4+Mod1+c exec warpd-rs --normal
 
 Place a TOML file at `~/.config/warpd-rs/config.toml`:
 
-You can also pass an explicit config file path with `--config /path/to/config.toml`.
-When `--config` is provided, default search locations are not used.
 
-```toml
-# Characters used for hint labels (order matters)
-hint_chars = "aoeuidhtns"
-
-# Visual appearance
-hint_bgcolor = "#1e1e2e"
-hint_fgcolor = "#cdd6f4"
-hint_border_radius = 4.0
-hint_font = "monospace"
-hint_font_size = 16.0
-hint_grid_gap = 80
-
-# Grid mode
-grid_color = "#89b4fa"
-grid_border_size = 2
-grid_min_size = 30.0
-
-# Normal mode movement speed
-speed = 220
-
-# Cursor appearance
-cursor_color = "#f38ba8"
-cursor_size = 7
-```
-
-Any missing keys use sensible defaults (Catppuccin Mocha palette).
-
-## Architecture
+## Source
 
 ```
 src/
 ├── main.rs           CLI parsing, mode orchestration, event loop
-├── config/mod.rs     TOML config loading, colour parsing
-├── wayland/mod.rs    Wayland connection, globals, overlays, virtual pointer
-├── hint/mod.rs       Hint generation, Cairo drawing, grid mode drawing
-└── input/mod.rs      Key event helpers, keysym constants
+├── config.rs     TOML config loading, colour parsing
+├── wayland.rs    Wayland connection, globals, overlays, virtual pointer
+├── hint.rs       Hint generation, Cairo drawing, grid mode drawing
+└── input.rs      Key event helpers, keysym constants
 ```
 
 ### Wayland protocols used
@@ -160,20 +164,10 @@ src/
 1. On launch, connects to the Wayland compositor and binds globals
 2. Enumerates all monitors via `wl_output` + `zxdg_output_v1`
 3. Creates a full-screen overlay on the target monitor using `zwlr_layer_shell_v1`
-   with exclusive keyboard interactivity
 4. Allocates a POSIX shared-memory buffer and creates a Cairo surface over it
 5. Draws mode-specific visuals (hints / grid / cursor) into the buffer
 6. Processes keyboard input via `wl_keyboard` + xkbcommon
 7. On selection, destroys the overlay and warps the pointer via `zwlr_virtual_pointer_v1`
-
-## Differences from the original warpd
-
-- **Rust** instead of C
-- **Wayland-only** — no X11, macOS, or Windows backends
-- **Oneshot only** — no daemon mode (compositor handles hotkeys)
-- **Cairo** for drawing (same as original's Wayland path)
-- **TOML** config instead of custom format
-- Hint labels use **prefix-matching** (type-ahead filter)
 
 ## License
 

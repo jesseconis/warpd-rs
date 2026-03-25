@@ -6,9 +6,7 @@
 ///!   • zwlr_virtual_pointer_manager_v1 – synthetic mouse events
 ///!   • zxdg_output_manager_v1       – logical output geometry
 ///! These are available on Sway, Hyprland, and other wlroots compositors.
-
 use std::os::fd::{AsFd, OwnedFd};
-
 use anyhow::{bail, Context, Result};
 use wayland_client::protocol::{
     wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_region, wl_registry, wl_seat, wl_shm,
@@ -24,6 +22,8 @@ use wayland_protocols::xdg::xdg_output::zv1::client::{
 use wayland_protocols_wlr::layer_shell::v1::client::{
     zwlr_layer_shell_v1, zwlr_layer_surface_v1,
 };
+#[cfg(feature = "opencv")]
+use wayland_protocols_wlr::screencopy::v1::client::{zwlr_screencopy_manager_v1, zwlr_screencopy_frame_v1};
 use wayland_protocols_wlr::virtual_pointer::v1::client::{
     zwlr_virtual_pointer_manager_v1, zwlr_virtual_pointer_v1,
 };
@@ -66,7 +66,6 @@ pub struct Overlay {
     pub surface: wl_surface::WlSurface,
     pub layer_surface: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
     pub shm_buffer: ShmBuffer,
-    pub configured: bool,
 }
 
 /// A keyboard event delivered from Wayland.
@@ -76,6 +75,41 @@ pub struct KeyEvent {
     pub sym: u32,       // XKB keysym
     pub state: KeyState, // pressed / released
     pub utf8: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PointerPosSource {
+    Enter,
+    Motion,
+}
+
+/// Captured output frame metadata and pixels.
+#[derive(Debug, Clone)]
+pub struct CapturedFrame {
+    pub width: i32,
+    pub height: i32,
+    pub stride: i32,
+    pub format: wl_shm::Format,
+    pub y_invert: bool,
+    pub data: Vec<u8>,
+}
+
+#[cfg(feature = "opencv")]
+#[derive(Debug, Clone)]
+struct ScreencopyBufferInfo {
+    format: wl_shm::Format,
+    width: i32,
+    height: i32,
+    stride: i32,
+}
+
+#[cfg(feature = "opencv")]
+#[derive(Debug, Default)]
+struct ScreencopyFrameState {
+    buffer_info: Option<ScreencopyBufferInfo>,
+    y_invert: bool,
+    ready: bool,
+    failed: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +123,8 @@ pub struct WaylandState {
     pub seat: Option<wl_seat::WlSeat>,
     pub layer_shell: Option<zwlr_layer_shell_v1::ZwlrLayerShellV1>,
     pub vptr_mgr: Option<zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1>,
+    #[cfg(feature = "opencv")]
+    pub screencopy_mgr: Option<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1>,
     pub xdg_output_mgr: Option<zxdg_output_manager_v1::ZxdgOutputManagerV1>,
 
     // collected monitors
@@ -106,6 +142,7 @@ pub struct WaylandState {
     // Pointer focus and position relative to the focused surface.
     pub pointer_focus_surface: Option<wl_surface::WlSurface>,
     pub pointer_surface_pos: Option<(f64, f64)>,
+    pub pointer_surface_pos_source: Option<PointerPosSource>,
 
     // Output that the compositor assigned to our surface (from wl_surface.enter).
     pub surface_entered_output: Option<wl_output::WlOutput>,
@@ -139,6 +176,7 @@ impl std::fmt::Debug for WaylandState {
             .field("xkb_state", &self.xkb_state.as_ref().map(|_| "<xkb::State>"))
             .field("pointer_focus_surface", &self.pointer_focus_surface)
             .field("pointer_surface_pos", &self.pointer_surface_pos)
+            .field("pointer_surface_pos_source", &self.pointer_surface_pos_source)
             .field("surface_entered_output", &self.surface_entered_output)
             .field("vptr", &self.vptr)
             .field("layer_surface_configured", &self.layer_surface_configured)
@@ -168,6 +206,8 @@ impl WaylandState {
             seat: None,
             layer_shell: None,
             vptr_mgr: None,
+            #[cfg(feature = "opencv")]
+            screencopy_mgr: None,
             xdg_output_mgr: None,
             monitors: Vec::new(),
             pending_outputs: Vec::new(),
@@ -178,6 +218,7 @@ impl WaylandState {
             xkb_state: None,
             pointer_focus_surface: None,
             pointer_surface_pos: None,
+            pointer_surface_pos_source: None,
             surface_entered_output: None,
             key_tx: tx,
             key_rx: rx,
@@ -360,6 +401,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandState {
                 );
                 state.pointer_focus_surface = Some(surface);
                 state.pointer_surface_pos = Some((surface_x, surface_y));
+                state.pointer_surface_pos_source = Some(PointerPosSource::Enter);
             }
             wl_pointer::Event::Motion {
                 surface_x,
@@ -367,9 +409,15 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandState {
                 ..
             } => {
                 state.pointer_surface_pos = Some((surface_x, surface_y));
+                state.pointer_surface_pos_source = Some(PointerPosSource::Motion);
             }
             wl_pointer::Event::Leave { surface, .. } => {
                 log::debug!("pointer leave: surface={:?}", surface);
+                if state.pointer_focus_surface.as_ref() == Some(&surface) {
+                    state.pointer_focus_surface = None;
+                    state.pointer_surface_pos = None;
+                    state.pointer_surface_pos_source = None;
+                }
             }
             _ => {log::debug!("WLPointerEvent::{:?}", event);}
         }
@@ -492,14 +540,74 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for WaylandState {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
-        match event {
-            _ => {log::debug!("WlLayerSurfaceEvent::{:?}",event);}
-        };
+        {log::debug!("WlLayerSurfaceEvent::{:?}",event);};
         if let zwlr_layer_surface_v1::Event::Configure { serial, width, height } = event {
             surface.ack_configure(serial);
             state.layer_surface_configured = true;
             log::info!("layer surface configured (serial={serial}, width={width}, height={height})");
         };
+    }
+}
+
+#[cfg(feature = "opencv")]
+impl Dispatch<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1, ()> for WaylandState {
+    fn event(
+        _: &mut Self,
+        _: &zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
+        _: zwlr_screencopy_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+}
+
+#[cfg(feature = "opencv")]
+impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, std::sync::Arc<std::sync::Mutex<ScreencopyFrameState>>> for WaylandState {
+    fn event(
+        _state: &mut Self,
+        _proxy: &zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
+        event: zwlr_screencopy_frame_v1::Event,
+        data: &std::sync::Arc<std::sync::Mutex<ScreencopyFrameState>>,
+        _conn: &Connection,
+        _qh: &QueueHandle<Self>,
+    ) {
+        let mut guard = match data.lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+
+        match event {
+            zwlr_screencopy_frame_v1::Event::Buffer {
+                format,
+                width,
+                height,
+                stride,
+            } => {
+                let Some(fmt) = wayland_client::WEnum::into_result(format).ok() else {
+                    return;
+                };
+                guard.buffer_info = Some(ScreencopyBufferInfo {
+                    format: fmt,
+                    width: width as i32,
+                    height: height as i32,
+                    stride: stride as i32,
+                });
+            }
+            zwlr_screencopy_frame_v1::Event::Flags { flags } => {
+                let y_invert = wayland_client::WEnum::into_result(flags)
+                    .map(|f| f.contains(zwlr_screencopy_frame_v1::Flags::YInvert))
+                    .unwrap_or(false);
+                guard.y_invert = y_invert;
+            }
+            zwlr_screencopy_frame_v1::Event::Ready { .. } => {
+                guard.ready = true;
+            }
+            zwlr_screencopy_frame_v1::Event::Failed => {
+                guard.failed = true;
+            }
+            _ => {}
+        }
     }
 }
 
@@ -557,11 +665,16 @@ pub fn connect() -> Result<(WaylandState, EventQueue<WaylandState>)> {
     let qh = queue.handle();
 
     // Bind globals from the GlobalList (registry_queue_init already did the roundtrip)
-    log::debug!("compositor registry: {:?}", globals.contents().clone_list());
+    // log::debug!("compositor registry: {:?}", globals.contents().clone_list());
+
     state.compositor = globals.bind::<wl_compositor::WlCompositor, _, _>(&qh, 1..=6, ()).ok();
     state.shm = globals.bind::<wl_shm::WlShm, _, _>(&qh, 1..=1, ()).ok();
     state.seat = globals.bind::<wl_seat::WlSeat, _, _>(&qh, 1..=9, ()).ok();
     state.layer_shell = globals.bind::<zwlr_layer_shell_v1::ZwlrLayerShellV1, _, _>(&qh, 1..=5, ()).ok();
+    #[cfg(feature = "opencv")]
+    {
+        state.screencopy_mgr = globals.bind::<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1, _, _>(&qh, 1..=3, ()).ok();
+    }
     state.vptr_mgr = globals.bind::<zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1, _, _>(&qh, 1..=2, ()).ok();
     state.xdg_output_mgr = globals.bind::<zxdg_output_manager_v1::ZxdgOutputManagerV1, _, _>(&qh, 1..=3, ()).ok();
 
@@ -619,6 +732,7 @@ pub fn connect() -> Result<(WaylandState, EventQueue<WaylandState>)> {
         })
         .collect();
 
+    // zoop 
     if state.monitors.is_empty() {
         bail!("no monitors detected");
     }
@@ -663,7 +777,17 @@ pub fn create_shm_buffer(
     width: i32,
     height: i32,
 ) -> Result<ShmBuffer> {
-    let stride = width * 4; // ARGB8888
+    create_shm_buffer_with_layout(shm, qh, width, height, width * 4, wl_shm::Format::Argb8888)
+}
+
+fn create_shm_buffer_with_layout(
+    shm: &wl_shm::WlShm,
+    qh: &QueueHandle<WaylandState>,
+    width: i32,
+    height: i32,
+    stride: i32,
+    format: wl_shm::Format,
+) -> Result<ShmBuffer> {
     let size = (stride * height) as usize;
 
     // Create an anonymous shared memory file
@@ -684,7 +808,7 @@ pub fn create_shm_buffer(
         width,
         height,
         stride,
-        wl_shm::Format::Argb8888,
+        format,
         qh,
         (),
     );
@@ -697,6 +821,94 @@ pub fn create_shm_buffer(
         pool,
         buffer,
         data,
+    })
+}
+
+/// Returns true when the compositor supports wlr screencopy.
+#[cfg(feature = "opencv")]
+pub fn supports_screencopy(state: &WaylandState) -> bool {
+    state.screencopy_mgr.is_some()
+}
+
+/// Capture one frame from the given output with wlr-screencopy into a wl_shm buffer.
+#[cfg(feature = "opencv")]
+pub fn capture_output_frame(
+    state: &mut WaylandState,
+    queue: &mut EventQueue<WaylandState>,
+    monitor: &Monitor,
+) -> Result<CapturedFrame> {
+    let Some(mgr) = state.screencopy_mgr.as_ref() else {
+        bail!("zwlr_screencopy_manager_v1 not available");
+    };
+
+    let qh = queue.handle();
+    let frame_state = std::sync::Arc::new(std::sync::Mutex::new(ScreencopyFrameState::default()));
+    let frame = mgr.capture_output(0, &monitor.wl_output, &qh, frame_state.clone());
+
+    // Wait until we get wl_shm buffer details or an early failure.
+    loop {
+        queue.blocking_dispatch(state)?;
+        let guard = frame_state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("screencopy frame state poisoned"))?;
+        if guard.failed {
+            frame.destroy();
+            bail!("screencopy capture failed before buffer negotiation");
+        }
+        if guard.buffer_info.is_some() {
+            break;
+        }
+    }
+
+    let info = frame_state
+        .lock()
+        .map_err(|_| anyhow::anyhow!("screencopy frame state poisoned"))?
+        .buffer_info
+        .clone()
+        .context("screencopy did not provide wl_shm buffer info")?;
+
+    let shm = state.shm.as_ref().context("wl_shm is unavailable")?;
+    let qh = queue.handle();
+    let shm_buf = create_shm_buffer_with_layout(
+        shm,
+        &qh,
+        info.width,
+        info.height,
+        info.stride,
+        info.format,
+    )?;
+
+    frame.copy(&shm_buf.buffer);
+    queue.flush()?;
+
+    loop {
+        queue.blocking_dispatch(state)?;
+        let guard = frame_state
+            .lock()
+            .map_err(|_| anyhow::anyhow!("screencopy frame state poisoned"))?;
+        if guard.failed {
+            frame.destroy();
+            bail!("screencopy capture failed");
+        }
+        if guard.ready {
+            break;
+        }
+    }
+
+    let y_invert = frame_state
+        .lock()
+        .map_err(|_| anyhow::anyhow!("screencopy frame state poisoned"))?
+        .y_invert;
+
+    frame.destroy();
+
+    Ok(CapturedFrame {
+        width: info.width,
+        height: info.height,
+        stride: info.stride,
+        format: info.format,
+        y_invert,
+        data: shm_buf.data.to_vec(),
     })
 }
 
@@ -849,7 +1061,6 @@ pub fn create_overlay(
         surface,
         layer_surface,
         shm_buffer,
-        configured: true,
     })
 }
 
@@ -857,7 +1068,7 @@ pub fn create_overlay(
 /// logical coordinate space.
 ///
 /// The zwlr_virtual_pointer_v1.motion_absolute protocol works as follows:
-///   position = (x / x_extent, y / y_extent)  →  normalised [0,1] range
+///   position = (x / x_extent, y / y_extent)  →  normalised 0,1 range
 /// So we pass pixel coordinates relative to the bounding-box origin,
 /// with the bounding-box dimensions as extents.
 pub fn warp_pointer(
@@ -923,10 +1134,11 @@ pub fn click_button(state: &WaylandState, button: u32) {
 pub fn pointer_position_on_surface(
     state: &WaylandState,
     surface: &wl_surface::WlSurface,
-) -> Option<(f64, f64)> {
+) -> Option<(f64, f64, PointerPosSource)> {
     if state.pointer_focus_surface.as_ref() == Some(surface) {
-        log::debug!("pointer position on surface: {:?}", state.pointer_surface_pos);
-        return state.pointer_surface_pos;
+        if let (Some((x, y)), Some(source)) = (state.pointer_surface_pos, state.pointer_surface_pos_source) {
+            return Some((x, y, source));
+        }
     }
     None
 }
