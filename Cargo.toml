@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2021"
 description = "keyboard-driven virtual pointer for Wayland"
 license = "MIT"
+repository = "https://github.com/jesseconis/warpd-rs"
+homepage = ""
+documentation = "https://docs.rs/warpd-rs"
+publish = false
+
+[features]
+default = []
+opencv = ["dep:opencv"]
 
 [dependencies]
 wayland-client = "0.31"
@@ -22,3 +30,5 @@ thiserror = "2"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 dirs = "6"
+opencv = { version = "0.95", optional = true, default-features = false, features = ["clang-runtime", "imgproc", "imgcodecs"] }
+
