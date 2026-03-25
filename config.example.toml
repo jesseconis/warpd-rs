@@ -5,10 +5,12 @@
 # With 26 chars you get 26 single-char + 676 two-char labels = 702 hints.
 # Dvorak home-row example:
 # hint_chars = "aoeuidhtns"
+hint_source = "grid" # grid | stdin | detect
 hint_chars = "abcdefghijklmnopqrstuvwxyz"
 
 # -- Hint mode visuals (Catppuccin Mocha defaults) --
 hint_bgcolor   = "#1e1e2e"
+hint_bg_opacity = 0.5      # 0.0 (fully transparent) to 1.0 (fully opaque)
 hint_fgcolor   = "#cdd6f4"
 hint_border_radius = 4.0
 hint_font      = "monospace"
