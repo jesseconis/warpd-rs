@@ -19,19 +19,19 @@ Wayland-first implementation that targets wlroots-based compositors
 
 #### Static hint source (`hint_source = "grid"`)
 
-[>](docs/tile_static.mp4)
+[>](./docs/tile_static.mp4)
 
 #### Detection hint source (`hint_source = "detect"`)
 
-[>](docs/tile_detect.mp4)
+[>](./docs/tile_detect.mp4)
 
 ### Grid mode demo
 
-[>](docs/grid.mp4)
+[>](./docs/grid.mp4)
 
 ### Normal mode demo
 
-[>](docs/normal.mp4)
+[>](./docs/normal.mp4)
 
 </details>
 
