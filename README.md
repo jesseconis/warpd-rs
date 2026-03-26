@@ -16,14 +16,14 @@ Wayland-first implementation that targets wlroots-based compositors
 <details>
 <summary>Static hint source (`hint_source = "grid"`)</summary>
 
-[>](./docs/tile_static.mp4)
+<video src="https://github.com/jesseconis/warpd-rs/raw/refs/heads/main/docs/tile_static.mp4" controls width="100%"></video>
 
 </details>
 
 <details>
 <summary>Detection hint source (`hint_source = "detect"`)</summary>
 
-[>](./docs/tile_detect.mp4)
+<video src="https://github.com/jesseconis/warpd-rs/raw/refs/heads/main/docs/tile_detect.mp4" controls width="100%"></video>
 
 </details>
 
@@ -35,7 +35,7 @@ Wayland-first implementation that targets wlroots-based compositors
 <details>
 <summary>Grid mode demo</summary>
 
-[>](https://github.com/jesseconis/warpd-rs/blob/main/docs/grid.mp4)
+<video src="https://github.com/jesseconis/warpd-rs/raw/refs/heads/main/docs/grid.mp4" controls width="100%"></video>
 
 </details>
 
@@ -44,7 +44,7 @@ Wayland-first implementation that targets wlroots-based compositors
 <details>
 <summary>Normal mode demo</summary>
 
-[>](./docs/normal.mp4)
+<video src="https://github.com/jesseconis/warpd-rs/raw/refs/heads/main/docs/normal.mp4" controls width="100%"></video>
 
 </details>
 
