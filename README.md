@@ -35,7 +35,7 @@ Wayland-first implementation that targets wlroots-based compositors
 <details>
 <summary>Grid mode demo</summary>
 
-[>](./docs/grid.mp4)
+[>](https://github.com/jesseconis/warpd-rs/blob/main/docs/grid.mp4)
 
 </details>
 
