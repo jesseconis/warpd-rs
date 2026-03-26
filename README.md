@@ -9,27 +9,40 @@ Wayland-first implementation that targets wlroots-based compositors
 ## Modes
 
 - **Hint mode** — screen fills with labelled targets; type to warp instantly
-- **Grid mode** — recursive quadrant subdivision (u/i/j/k) ...
-- **Normal mode** — hjkl continuous cursor movement with crosshair overlay
 
 <details>
-<summary>Mode video demos</summary>
+<summary>Hint mode</summary>
 
-### Hint mode demos
-
-#### Static hint source (`hint_source = "grid"`)
+<details>
+<summary>Static hint source (`hint_source = "grid"`)</summary>
 
 [>](./docs/tile_static.mp4)
 
-#### Detection hint source (`hint_source = "detect"`)
+</details>
+
+<details>
+<summary>Detection hint source (`hint_source = "detect"`)</summary>
 
 [>](./docs/tile_detect.mp4)
 
-### Grid mode demo
+</details>
+
+</details>
+
+
+- **Grid mode** — recursive quadrant subdivision (u/i/j/k) ...
+
+<details>
+<summary>Grid mode demo</summary>
 
 [>](./docs/grid.mp4)
 
-### Normal mode demo
+</details>
+
+- **Normal mode** — hjkl continuous cursor movement with crosshair overlay
+
+<details>
+<summary>Normal mode demo</summary>
 
 [>](./docs/normal.mp4)
 
