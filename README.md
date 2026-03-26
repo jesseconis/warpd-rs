@@ -9,8 +9,33 @@ Wayland-first implementation that targets wlroots-based compositors
 ## Modes
 
 - **Hint mode** — screen fills with labelled targets; type to warp instantly
-- **Grid mode** — recursive quadrant subdivision (u/i/j/k) for precise positioning
+- **Grid mode** — recursive quadrant subdivision (u/i/j/k) ...
 - **Normal mode** — hjkl continuous cursor movement with crosshair overlay
+
+<details>
+<summary>Mode video demos</summary>
+
+### Hint mode demos
+
+#### Static hint source (`hint_source = "grid"`)
+
+[>](docs/tile_static.mp4)
+
+#### Detection hint source (`hint_source = "detect"`)
+
+[>](docs/tile_detect.mp4)
+
+### Grid mode demo
+
+[>](docs/grid.mp4)
+
+### Normal mode demo
+
+[>](docs/normal.mp4)
+
+</details>
+
+## Debug
 
 ## Install
 
@@ -136,38 +161,6 @@ Hint targets are selected by `hint_source`:
 Place a TOML file at `~/.config/warpd-rs/config.toml`:
 
 
-## Source
-
-```
-src/
-├── main.rs           CLI parsing, mode orchestration, event loop
-├── config.rs     TOML config loading, colour parsing
-├── wayland.rs    Wayland connection, globals, overlays, virtual pointer
-├── hint.rs       Hint generation, Cairo drawing, grid mode drawing
-└── input.rs      Key event helpers, keysym constants
-```
-
-### Wayland protocols used
-
-| Protocol | Purpose |
-|---|---|
-| `wl_compositor` | Surface creation |
-| `wl_shm` | Shared-memory buffer allocation |
-| `wl_seat` / `wl_keyboard` | Input capture |
-| `wl_output` | Monitor enumeration |
-| `zwlr_layer_shell_v1` | Fullscreen overlay above all windows |
-| `zwlr_virtual_pointer_manager_v1` | Synthetic mouse movement & clicks |
-| `zxdg_output_manager_v1` | Logical monitor geometry |
-
-### How it works
-
-1. On launch, connects to the Wayland compositor and binds globals
-2. Enumerates all monitors via `wl_output` + `zxdg_output_v1`
-3. Creates a full-screen overlay on the target monitor using `zwlr_layer_shell_v1`
-4. Allocates a POSIX shared-memory buffer and creates a Cairo surface over it
-5. Draws mode-specific visuals (hints / grid / cursor) into the buffer
-6. Processes keyboard input via `wl_keyboard` + xkbcommon
-7. On selection, destroys the overlay and warps the pointer via `zwlr_virtual_pointer_v1`
 
 ## License
 
