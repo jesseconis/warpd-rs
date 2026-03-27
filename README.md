@@ -8,66 +8,42 @@ Wayland-first implementation that targets wlroots-based compositors
 
 ## Modes
 
-- **Hint mode** — screen fills with labelled targets; type to warp instantly
+<details>
+<summary>Hint</summary>
+<details>
+<summary>Static</summary>
+<video src="https://github.com/user-attachments/assets/f0d89408-7df8-4b66-bd53-e8a392aca67b" controls width="100%"></video>
+</details>
+   <details>
+<summary>Detect</summary>
+
+<video src="https://github.com/user-attachments/assets/854f5c75-3410-43cc-92df-6a280aeefc76" controls width="100%"></video>
+
+</details>
+</details>
+
 
 <details>
-<summary>Hint mode</summary>
+<summary>Grid</summary>
 
-<details>
-<summary>Static hint source (`hint_source = "grid"`)</summary>
-
-<video src="https://github.com/jesseconis/warpd-rs/raw/refs/heads/main/docs/tile_static.mp4" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/90aa074a-6778-4416-9d61-77372dbc2295" controls width="100%"></video>
 
 </details>
 
 <details>
-<summary>Detection hint source (`hint_source = "detect"`)</summary>
+<summary>Normal</summary>
 
-<video src="https://github.com/jesseconis/warpd-rs/raw/refs/heads/main/docs/tile_detect.mp4" controls width="100%"></video>
-
-</details>
-
-</details>
-
-
-- **Grid mode** — recursive quadrant subdivision (u/i/j/k) ...
-
-<details>
-<summary>Grid mode demo</summary>
-
-<video src="https://github.com/jesseconis/warpd-rs/raw/refs/heads/main/docs/grid.mp4" controls width="100%"></video>
-
-</details>
-
-- **Normal mode** — hjkl continuous cursor movement with crosshair overlay
-
-<details>
-<summary>Normal mode demo</summary>
-
-<video src="https://github.com/jesseconis/warpd-rs/raw/refs/heads/main/docs/normal.mp4" controls width="100%"></video>
+<video src="https://github.com/user-attachments/assets/2a2e27f1-ea5c-4bab-a521-1822d4c9b13d" controls width="100%"></video>
 
 </details>
 
 ## Debug
 
-## Install
+`RUST_LOG=debug ./warpd-rs --<mode>` 
 
-System libraries (install via your package manager):
+For troubleshooting compositor/wayland issues `WAYLAND_DEBUG=1` 
 
-```bash
-# arch 
-sudo pacman -S wayland cairo pango libxkbcommon
-```
 
-For floating target auto-detection (`hint_source = "detect"`), OpenCV is also required:
-
-```bash
-# Arch
-sudo pacman -S opencv
-
-# Debian/Ubuntu
-sudo apt install libopencv-dev
-```
 
 ## Build
 
@@ -99,12 +75,6 @@ warpd-rs --hint --config ./config.example.toml
 
 ```text
 warpd-rs 0.1.0 (opencv)
-```
-
-If OpenCV support is not compiled in, it prints:
-
-```text
-warpd-rs 0.1.0 (none)
 ```
 
 ### Target Detection Invocation
@@ -171,7 +141,7 @@ Hint targets are selected by `hint_source`:
 
 ## Configuration
 
-Place a TOML file at `~/.config/warpd-rs/config.toml`:
+Place a TOML file at `~/.config/warpd-rs/config.toml` [an example/default is provided](./example.config.toml)
 
 
 
