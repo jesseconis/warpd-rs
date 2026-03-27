@@ -454,18 +454,24 @@ pub fn draw_grid(
     };
     let cr = cairo::Context::new(&surface)?;
 
-    // Clear to semi-transparent
+    /*
+    Clear to semi-transparent
+    */
     cr.set_operator(cairo::Operator::Source);
     cr.set_source_rgba(0.0, 0.0, 0.0, 0.25);
     cr.paint()?;
 
-    // Highlight selected region
+    /*
+    Highlight selected region
+    */
     cr.set_operator(cairo::Operator::Over);
     cr.set_source_rgba(1.0, 1.0, 1.0, 0.05);
     cr.rectangle(sel.x, sel.y, sel.w, sel.h);
     cr.fill()?;
 
-    // Draw crosshair
+    /*
+    Draw crosshair
+    */
     let (gr, gg, gb, _) = config::parse_hex_color(&config.grid_color);
     let lw = config.grid_border_size as f64;
     cr.set_source_rgba(gr, gg, gb, 0.8);

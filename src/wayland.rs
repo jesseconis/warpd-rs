@@ -84,6 +84,7 @@ pub enum PointerPosSource {
 }
 
 /// Captured output frame metadata and pixels.
+#[cfg(feature = "opencv")]
 #[derive(Debug, Clone)]
 pub struct CapturedFrame {
     pub width: i32,
@@ -652,11 +653,6 @@ impl Dispatch<zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1, ()> for WaylandStat
     fn event(_: &mut Self, _: &zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1, _: zwlr_virtual_pointer_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
 }
 
-// ---------------------------------------------------------------------------
-// Public API – connect, discover monitors, create overlays, warp pointer
-// ---------------------------------------------------------------------------
-
-/// Connect to the Wayland compositor, bind all required globals, discover monitors.
 pub fn connect() -> Result<(WaylandState, EventQueue<WaylandState>)> {
     let conn = Connection::connect_to_env().context("cannot connect to Wayland display")?;
     let (globals, mut queue) = registry_queue_init::<WaylandState>(&conn)
@@ -664,7 +660,6 @@ pub fn connect() -> Result<(WaylandState, EventQueue<WaylandState>)> {
     let mut state = WaylandState::new();
     let qh = queue.handle();
 
-    // Bind globals from the GlobalList (registry_queue_init already did the roundtrip)
     // log::debug!("compositor registry: {:?}", globals.contents().clone_list());
 
     state.compositor = globals.bind::<wl_compositor::WlCompositor, _, _>(&qh, 1..=6, ()).ok();
@@ -678,9 +673,7 @@ pub fn connect() -> Result<(WaylandState, EventQueue<WaylandState>)> {
     state.vptr_mgr = globals.bind::<zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1, _, _>(&qh, 1..=2, ()).ok();
     state.xdg_output_mgr = globals.bind::<zxdg_output_manager_v1::ZxdgOutputManagerV1, _, _>(&qh, 1..=3, ()).ok();
 
-    // Bind all wl_output instances
     let global_list = globals.contents().clone_list();
-    // log::debug!("{:#?}", global_list);
     for g in &global_list {
         if g.interface == "wl_output" {
             let output: wl_output::WlOutput = globals
@@ -693,13 +686,11 @@ pub fn connect() -> Result<(WaylandState, EventQueue<WaylandState>)> {
         }
     }
 
-    // Validate required globals
     if state.compositor.is_none() { bail!("wl_compositor not available"); }
     if state.shm.is_none() { bail!("wl_shm not available"); }
     if state.layer_shell.is_none() { bail!("zwlr_layer_shell_v1 not available – is this a wlroots compositor?"); }
     if state.vptr_mgr.is_none() { bail!("zwlr_virtual_pointer_manager_v1 not available"); }
 
-    // Roundtrip to receive output geometry events
     queue.roundtrip(&mut state)?;
 
     // Request xdg_output for logical geometry if available
@@ -711,7 +702,6 @@ pub fn connect() -> Result<(WaylandState, EventQueue<WaylandState>)> {
             }
         }
     }
-
     // Second roundtrip to collect xdg output info
     queue.roundtrip(&mut state)?;
 
@@ -732,18 +722,15 @@ pub fn connect() -> Result<(WaylandState, EventQueue<WaylandState>)> {
         })
         .collect();
 
-    // zoop 
     if state.monitors.is_empty() {
         bail!("no monitors detected");
     }
 
-    // Create virtual pointer
     if let (Some(ref mgr), Some(ref seat)) = (&state.vptr_mgr, &state.seat) {
         let qh = queue.handle();
         state.vptr = Some(mgr.create_virtual_pointer(Some(seat), &qh, ()));
     }
 
-    // Request keyboard
     if let Some(ref seat) = state.seat {
         let qh = queue.handle();
         if state.keyboard.is_none() {
@@ -765,8 +752,6 @@ pub fn connect() -> Result<(WaylandState, EventQueue<WaylandState>)> {
             .collect::<Vec<_>>()
             .join(", ")
     );
-    // log::debug!("{:#?}", &state);
-
     Ok((state, queue))
 }
 
@@ -1097,48 +1082,11 @@ pub fn warp_pointer(
             dur.as_millis() as u32
         };
 
-        log::debug!(
+        log::info!(
             "warp_pointer: abs=({x},{y}) rel=({rel_x},{rel_y}) extent=({extent_w},{extent_h})"
         );
 
         vptr.motion_absolute(now, rel_x, rel_y, extent_w, extent_h);
         vptr.frame();
     }
-}
-
-/// Simulate a mouse button click (press + release).
-/// button: 1=left, 2=middle, 3=right  (mapped to Linux BTN_LEFT etc.)
-pub fn click_button(state: &WaylandState, button: u32) {
-    let code = match button {
-        1 => 0x110, // BTN_LEFT
-        2 => 0x112, // BTN_MIDDLE
-        3 => 0x111, // BTN_RIGHT
-        _ => return,
-    };
-    if let Some(ref vptr) = state.vptr {
-        let now = {
-            let dur = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default();
-            dur.as_millis() as u32
-        };
-        vptr.button(now, code, wl_pointer::ButtonState::Pressed);
-        vptr.frame();
-        vptr.button(now + 1, code, wl_pointer::ButtonState::Released);
-        vptr.frame();
-    }
-}
-
-/// Return the current pointer position for the given surface, if that surface
-/// currently has pointer focus.
-pub fn pointer_position_on_surface(
-    state: &WaylandState,
-    surface: &wl_surface::WlSurface,
-) -> Option<(f64, f64, PointerPosSource)> {
-    if state.pointer_focus_surface.as_ref() == Some(surface) {
-        if let (Some((x, y)), Some(source)) = (state.pointer_surface_pos, state.pointer_surface_pos_source) {
-            return Some((x, y, source));
-        }
-    }
-    None
 }
