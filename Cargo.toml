@@ -1,6 +1,6 @@
 [package]
 name = "warpd-rs"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
 description = "keyboard-driven virtual pointer for Wayland"
 license = "MIT"
