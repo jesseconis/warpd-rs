@@ -122,7 +122,7 @@ fn run_hint_mode(
                 hint::generate_hints(&monitor, cfg)
             }
         }
-        "grid" => hint::generate_hints(&monitor, cfg),
+        "static" => hint::generate_hints(&monitor, cfg),
         _ => {
             log::warn!("unknown hint_source '{}', falling back to grid", cfg.hint_source);
             hint::generate_hints(&monitor, cfg)

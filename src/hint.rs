@@ -490,7 +490,7 @@ pub fn draw_grid(
 
     // Labels in each quadrant
     cr.select_font_face("monospace", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
-    cr.set_font_size(24.0);
+    cr.set_font_size(config.grid_font_size);
     cr.set_source_rgba(gr, gg, gb, 0.6);
 
     let labels = [('u', sel.x + sel.w * 0.25, sel.y + sel.h * 0.25),

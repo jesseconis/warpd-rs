@@ -29,6 +29,8 @@ pub struct Config {
     // -- Grid mode --
     pub grid_color: String,
     pub grid_border_size: u32,
+    /// Font size in pixels for the grid quadrant labels.
+    pub grid_font_size: f64,
     /// Minimum width/height (in pixels) before grid auto-selects centre.
     pub grid_min_size: f64,
 
@@ -47,7 +49,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            hint_source: "grid".into(),
+            hint_source: "static".into(),
             hint_chars: "abcdefghijklmnopqrstuvwxyz".into(),
             hint_bgcolor: "#1e1e2e".into(),
             hint_bg_opacity: 1.0,
@@ -59,6 +61,7 @@ impl Default for Config {
 
             grid_color: "#89b4fa".into(),
             grid_border_size: 2,
+            grid_font_size: 36.0,
             grid_min_size: 270.0,
 
             speed: 220,
