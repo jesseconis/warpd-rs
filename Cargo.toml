@@ -35,6 +35,6 @@ opencv = { version = "0.98.2", optional = true, default-features = false, featur
 [workspace.metadata.release]
 sign-commit = true
 sign-tag = true
-pre-release-commit-message = "chore💤: Release"
-tag-message = "chore💤: Release"
+pre-release-commit-message = "chore💤: release {{crate_name}} v{{version}}"
+tag-message = "chore💤: release {{crate_name}} v{{version}}"
 
