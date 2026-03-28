@@ -8,34 +8,20 @@ Wayland-first implementation that targets wlroots-based compositors
 
 ## Modes
 
-<details>
-<summary>Hint</summary>
-<details>
-<summary>Static</summary>
-<video src="https://github.com/user-attachments/assets/f0d89408-7df8-4b66-bd53-e8a392aca67b" controls width="100%"></video>
-</details>
-   <details>
-<summary>Detect</summary>
 
-<video src="https://github.com/user-attachments/assets/854f5c75-3410-43cc-92df-6a280aeefc76" controls width="100%"></video>
+### Hint
 
-</details>
-</details>
+#### Static
+   <img src="docs/tile_static.gif" height="450px"/>
 
+#### Detect
+   <img src="docs/tile_detect.gif" height="450px"/>
 
-<details>
-<summary>Grid</summary>
+### Grid
+   <img src="docs/grid.gif" height="450px"/>
 
-<video src="https://github.com/user-attachments/assets/90aa074a-6778-4416-9d61-77372dbc2295" controls width="100%"></video>
-
-</details>
-
-<details>
-<summary>Normal</summary>
-
-<video src="https://github.com/user-attachments/assets/2a2e27f1-ea5c-4bab-a521-1822d4c9b13d" controls width="100%"></video>
-
-</details>
+### Normal
+   <img src="docs/normal.gif" height="450px"/>
 
 ## Debug
 
