@@ -20,6 +20,7 @@ prepare-release level='patch':
     cargo-release release {{level}} -x
 
 gh-release level='patch': (prepare-release level)
+    #!/usr/bin/env bash
     just build-bins
     git fetch --tags
     VERSION=$(cargo metadata --no-deps --format-version 1 | python3 -c "import sys,json; print(json.load(sys.stdin)['packages'][0]['version'])")
