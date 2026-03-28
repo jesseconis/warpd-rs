@@ -10,7 +10,7 @@ documentation = "https://docs.rs/warpd-rs"
 publish = false
 
 [features]
-default = []
+default = ["opencv"]
 opencv = ["dep:opencv"]
 
 [dependencies]
@@ -31,4 +31,10 @@ toml = "0.8"
 serde = { version = "1", features = ["derive"] }
 dirs = "6"
 opencv = { version = "0.98.2", optional = true, default-features = false, features = ["clang-runtime", "imgproc", "imgcodecs"] }
+
+[workspace.metadata.release]
+sign-commit = true
+sign-tag = true
+pre-release-commit-message = "chore💤: Release"
+tag-message = "chore💤: Release"
 
