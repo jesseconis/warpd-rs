@@ -18,6 +18,7 @@ mod input;
 #[cfg(feature = "opencv")]
 mod target_detection;
 mod wayland;
+mod pointer;
 
 use anyhow::Result;
 use clap::Parser;
@@ -25,6 +26,7 @@ use wayland_client::protocol::wl_output::Transform;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use wayland::KeyState;
+use pointer::{resolve_initial_pointer_position, surface_pointer_pos, click_button, warp_pointer};
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -153,17 +155,17 @@ fn run_hint_mode(
                     // CRITICAL: Send the pointer motion BEFORE destroying the overlay.
                     // Then flush + roundtrip to guarantee the compositor processes it
                     // before we tear down our surfaces and exit.
-                    wayland::warp_pointer(state, abs_x, abs_y);
+                    warp_pointer(state, abs_x, abs_y);
                     queue.flush()?;
                     queue.roundtrip(state)?;
 
                     // Now safe to tear down the overlay
                     overlay.layer_surface.destroy();
                     overlay.surface.destroy();
-                    wayland::click_button(state, 1);
+                    click_button(state, 1);
                     queue.flush()?;
 
-                    log::info!("hint selected → warp to ({abs_x}, {abs_y})");
+                    // log::info!("hint selected → warp to ({abs_x}, {abs_y})");
                     return Ok(());
                 }
                 hint::HintResult::Cancel => {
@@ -222,31 +224,33 @@ fn run_grid_mode(
                     };
                     sel.subdivide(ch);
 
-                    // If the grid is small enough, warp
+                    /*
+                    If the grid is small enough, warp
+                    */
                     if sel.w < cfg.grid_min_size && sel.h < cfg.grid_min_size {
                         let (cx, cy) = sel.centre();
                         let abs_x = monitor.x as f64 + cx;
                         let abs_y = monitor.y as f64 + cy;
-                        wayland::warp_pointer(state, abs_x, abs_y);
+                        warp_pointer(state, abs_x, abs_y);
                         queue.flush()?;
                         queue.roundtrip(state)?;
                         overlay.layer_surface.destroy();
                         overlay.surface.destroy();
+                        click_button(state, 1);
                         queue.flush()?;
-                        log::info!("grid selected → warp to ({abs_x}, {abs_y})");
+                        //log::info!("grid selected → warp to ({abs_x}, {abs_y})");
                         return Ok(());
                     }
 
                     hint::draw_grid(&mut overlay, &sel, cfg)?;
                     queue.flush()?;
                 }
-                // Mouse buttons
                 input::keysyms::M => {
                     let (cx, cy) = sel.centre();
                     let abs_x = monitor.x as f64 + cx;
                     let abs_y = monitor.y as f64 + cy;
-                    wayland::warp_pointer(state, abs_x, abs_y);
-                    wayland::click_button(state, 1);
+                    warp_pointer(state, abs_x, abs_y);
+                    click_button(state, 1);
                     queue.flush()?;
                     queue.roundtrip(state)?;
                     overlay.layer_surface.destroy();
@@ -338,7 +342,7 @@ fn run_normal_mode(
     queue.roundtrip(state)?;
     let startup_deadline = Instant::now() + Duration::from_millis(25);
     while Instant::now() < startup_deadline {
-        if let Some((_, _, source)) = wayland::pointer_position_on_surface(state, &overlay.surface) {
+        if let Some((_, _, source)) = pointer::surface_pointer_pos(state, &overlay.surface) {
             if source == wayland::PointerPosSource::Motion {
                 break;
             }
@@ -352,7 +356,7 @@ fn run_normal_mode(
         std::thread::sleep(Duration::from_millis(1));
     }
 
-    if let Some((px, py, source)) = wayland::pointer_position_on_surface(state, &overlay.surface) {
+    if let Some((px, py, source)) = pointer::surface_pointer_pos(state, &overlay.surface) {
         if source == wayland::PointerPosSource::Motion {
             last_pointer_motion_sample = Some((px, py));
         }
@@ -402,35 +406,28 @@ fn run_normal_mode(
 
         // Some compositors report pointer coords here as surface-local, others
         // effectively as global logical coords. Pick the value that fits.
-        let max_x = monitor.width as f64 - 1.0;
-        let max_y = monitor.height as f64 - 1.0;
-
         let allow_global_map = source == wayland::PointerPosSource::Motion;
-        let map_axis = |v: f64, offset: f64, max: f64, allow_global: bool| -> Option<f64> {
-            if (0.0..=max).contains(&v) {
-                return Some(v);
-            }
-            if !allow_global {
-                return None;
-            }
-            let global_to_local = v - offset;
-            if (0.0..=max).contains(&global_to_local) {
-                return Some(global_to_local);
-            }
-            None
-        };
-
-        let mut resolved_x = false;
-        let mut resolved_y = false;
-        if let Some(mx) = map_axis(init_x, monitor.x as f64, max_x, allow_global_map) {
-            cx = mx;
-            resolved_x = true;
-        }
-        if let Some(my) = map_axis(init_y, monitor.y as f64, max_y, allow_global_map) {
-            cy = my;
-            resolved_y = true;
-        }
-        if !resolved_x && !resolved_y {
+        if let Some((mapping, mapped_x, mapped_y)) = resolve_initial_pointer_position(
+            init_x,
+            init_y,
+            monitor.x as f64,
+            monitor.y as f64,
+            monitor.width as f64,
+            monitor.height as f64,
+            allow_global_map,
+        ) {
+            cx = mapped_x;
+            cy = mapped_y;
+            log::debug!(
+                "normal init pointer mapping: {} raw=({:.2},{:.2}) mapped=({:.2},{:.2}) monitor={}",
+                mapping,
+                init_x,
+                init_y,
+                cx,
+                cy,
+                monitor.name
+            );
+        } else {
             log::debug!(
                 "normal init pointer coords unusable, keeping fallback position: raw=({:.2},{:.2}) monitor={}",
                 init_x,
@@ -438,6 +435,9 @@ fn run_normal_mode(
                 monitor.name
             );
         }
+
+        let max_x = monitor.width as f64 - 1.0;
+        let max_y = monitor.height as f64 - 1.0;
 
         // Normalize for outputs that advertise transforms (e.g. horizontal flip).
         let tx = monitor.transform;
@@ -469,7 +469,6 @@ fn run_normal_mode(
     }
 
     loop {
-        // Non-blocking: try to read events from the Wayland fd, then dispatch.
         // We use prepare_read + read_events + dispatch_pending so we don't
         // block forever (we need to process held-key movement each frame).
         if let Some(guard) = queue.prepare_read() {
@@ -482,7 +481,7 @@ fn run_normal_mode(
         let mut moved = false;
 
         // Keep crosshair bound to physical pointer movement while in normal mode.
-        if let Some((px, py, source)) = wayland::pointer_position_on_surface(state, &overlay.surface)
+        if let Some((px, py, source)) = surface_pointer_pos(state, &overlay.surface)
         {
             if source == wayland::PointerPosSource::Motion {
                 let changed = last_pointer_motion_sample
@@ -522,20 +521,20 @@ fn run_normal_mode(
                     input::keysyms::M => {
                         let abs_x = monitor.x as f64 + cx;
                         let abs_y = monitor.y as f64 + cy;
-                        wayland::warp_pointer(state, abs_x, abs_y);
+                        warp_pointer(state, abs_x, abs_y);
                         queue.flush()?;
                         queue.roundtrip(state)?;
                         overlay.layer_surface.destroy();
                         overlay.surface.destroy();
-                        wayland::click_button(state, 1);
+                        click_button(state, 1);
                         queue.flush()?;
                         return Ok(());
                     }
                     input::keysyms::COMMA => {
                         let abs_x = monitor.x as f64 + cx;
                         let abs_y = monitor.y as f64 + cy;
-                        wayland::warp_pointer(state, abs_x, abs_y);
-                        wayland::click_button(state, 2);
+                        warp_pointer(state, abs_x, abs_y);
+                        click_button(state, 2);
                         queue.flush()?;
                         queue.roundtrip(state)?;
                         overlay.layer_surface.destroy();
@@ -546,13 +545,14 @@ fn run_normal_mode(
                     input::keysyms::PERIOD => {
                         let abs_x = monitor.x as f64 + cx;
                         let abs_y = monitor.y as f64 + cy;
-                        wayland::warp_pointer(state, abs_x, abs_y);
+                        warp_pointer(state, abs_x, abs_y);
+                        // 👀 -- why did I disable this??   
                         // wayland::click_button(state, 3);
                         queue.flush()?;
                         queue.roundtrip(state)?;
                         overlay.layer_surface.destroy();
                         overlay.surface.destroy();
-                        wayland::click_button(state, 3);
+                        click_button(state, 3);
                         queue.flush()?;
                         return Ok(());
                     }
@@ -608,9 +608,6 @@ fn run_normal_mode(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
 
 fn runtime_features_string() -> &'static str {
     #[cfg(feature = "opencv")]
@@ -624,6 +621,10 @@ fn runtime_features_string() -> &'static str {
     }
 }
 
+
+/// ---------------------------------------------------------------------------
+/// Entry point
+/// ---------------------------------------------------------------------------
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -653,14 +654,12 @@ fn main() -> Result<()> {
     let cfg = config::Config::load(cli.config.as_deref());
     let (mut state, mut queue) = wayland::connect()?;
 
-    //log::info!("monitors:");
-    
-    for m in &state.monitors {
-        log::info!(
-            "  {} — {}×{} @ ({}, {}) scale={}",
-            m.name, m.width, m.height, m.x, m.y, m.scale
-        );
-    }
+    // for m in &state.monitors {
+    //     log::info!(
+    //         "  {} — {}×{} @ ({}, {}) scale={}",
+    //         m.name, m.width, m.height, m.x, m.y, m.scale
+    //     );
+    // }
 
     if cli.hint {
         run_hint_mode(&mut state, &mut queue, &cfg)?;
