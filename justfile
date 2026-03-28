@@ -17,7 +17,7 @@ build-bins:
     @ls -lh dist/warpd-rs*v{{version}}
 
 prepare-release level='patch':
-    cargo-release release {{level}} -x
+    cargo-release release --execute {{level}} 
 
 gh-release level='patch': (prepare-release level)
     #!/usr/bin/env bash
