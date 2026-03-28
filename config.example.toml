@@ -20,6 +20,7 @@ hint_grid_gap  = 80          # pixels between hint centres
 # -- Grid mode --
 grid_color       = "#89b4fa"
 grid_border_size = 2
+grid_font_size   = 36.0        # quadrant label size in pixels
 grid_min_size    = 270.0       # auto-select when both width/height are below this
 
 # -- Normal mode --
