@@ -1,0 +1,10 @@
+frame: 2560x1080 stride=10240 format=Argb8888 y_invert=false
+monitor: name=HDMI-A-2 pos=(1920, -1080) size=2560x1080 transform=Normal
+pipeline: scale=1.0000 kernel=4x3
+rects: total=1754 kept_primary=706 kept_size_only=739 kept_final=706 used_fallback=false
+files:
+- /tmp/warpd-dbg/01_gray.png
+- /tmp/warpd-dbg/02_transformed.png
+- /tmp/warpd-dbg/03_edges.png
+- /tmp/warpd-dbg/04_dilated.png
+- /tmp/warpd-dbg/05_rects_overlay.png
