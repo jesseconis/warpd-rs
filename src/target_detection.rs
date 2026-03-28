@@ -139,30 +139,28 @@ fn filter_rects(rects: &[LogicalRect], hierarchy: &[Vec4i]) -> Vec<bool> {
     while let Some(i) = stack.pop() {
         if !filtered[i] {
             let parent_i = hierarchy[i][3] as usize;
-            if filtered[parent_i] {
+            let rect = rects[i];
+            if rect.h <= 6.0 {
                 filtered[i] = true;
             } else {
-                let rect = rects[i];
-                if rect.h <= 6.0 {
+                let parent = rects[parent_i];
+
+                let center_x = rect.x + rect.w / 2.0;
+                let center_y = rect.y + rect.h / 2.0;
+                let parent_center_x = parent.x + parent.w / 2.0;
+                let parent_center_y = parent.y + parent.h / 2.0;
+
+                // Do not inherit parent filtering: active-window outlines are often
+                // huge contours, and inheriting that filter hides most child targets.
+                if (center_x - parent_center_x).abs() < 8.0
+                    && (center_y - parent_center_y).abs() < 8.0
+                {
                     filtered[i] = true;
-                } else {
-                    let parent = rects[parent_i];
-
-                    let center_x = rect.x + rect.w / 2.0;
-                    let center_y = rect.y + rect.h / 2.0;
-                    let parent_center_x = parent.x + parent.w / 2.0;
-                    let parent_center_y = parent.y + parent.h / 2.0;
-
-                    if (center_x - parent_center_x).abs() < 8.0
-                        && (center_y - parent_center_y).abs() < 8.0
-                    {
-                        filtered[i] = true;
-                    } else if (parent.h - parent.w).abs() < 5.0
-                        && parent.h < 40.0
-                        && parent.w < 40.0
-                    {
-                        filtered[i] = true;
-                    }
+                } else if (parent.h - parent.w).abs() < 5.0
+                    && parent.h < 40.0
+                    && parent.w < 40.0
+                {
+                    filtered[i] = true;
                 }
             }
         }
@@ -182,6 +180,42 @@ fn filter_rects_size_only(rects: &[LogicalRect]) -> Vec<bool> {
         .iter()
         .map(|r| r.h >= 50.0 || r.w >= 500.0 || r.h <= 3.0 || r.w <= 7.0)
         .collect()
+}
+
+fn kept_split_counts(
+    rects: &[LogicalRect],
+    filtered: &[bool],
+    split_x: f64,
+) -> (usize, usize) {
+    let mut left = 0usize;
+    let mut right = 0usize;
+
+    for (rect, is_filtered) in rects.iter().zip(filtered.iter()) {
+        if *is_filtered {
+            continue;
+        }
+        let center_x = rect.x + rect.w / 2.0;
+        if center_x < split_x {
+            left += 1;
+        } else {
+            right += 1;
+        }
+    }
+
+    (left, right)
+}
+
+fn balance_ratio(a: usize, b: usize) -> f64 {
+    if a == 0 && b == 0 {
+        return 1.0;
+    }
+    let min_v = a.min(b) as f64;
+    let max_v = a.max(b) as f64;
+    if max_v == 0.0 {
+        1.0
+    } else {
+        min_v / max_v
+    }
 }
 
 fn detect_debug_enabled() -> bool {
@@ -298,7 +332,7 @@ fn maybe_dump_debug(
         log::warn!("target-detect debug: cannot write {}: {e}", stats_path.display());
     }
 
-    log::warn!(
+    log::debug!(
         "target detection debug dump written to {}",
         dir.display()
     );
@@ -377,17 +411,52 @@ pub fn detect_target_areas(frame: &CapturedFrame, monitor: &Monitor) -> Result<V
         0.0
     };
 
+    let split_x = monitor.width.max(1) as f64 / 2.0;
+    let (primary_left, primary_right) = kept_split_counts(&rects, &filtered_primary, split_x);
+    let (size_left, size_right) = kept_split_counts(&rects, &filtered_size_only, split_x);
+    let primary_balance = balance_ratio(primary_left, primary_right);
+    let size_balance = balance_ratio(size_left, size_right);
+
     // Some compositors/themes produce hierarchy trees that over-prune targets
     // (especially inside browser/content areas). Fall back to size-only filter
     // when primary output is sparse relative to total candidates.
-    let used_fallback = total_rects > 120 && (kept_primary < 80 || primary_ratio < 0.08);
+    let sparse_fallback = total_rects > 120 && (kept_primary < 80 || primary_ratio < 0.08);
+
+    // Focused/inactive styling can make hierarchy filtering hide one side of
+    // a split view. If size-only candidates are well balanced but primary is
+    // heavily one-sided, prefer size-only output.
+    let skew_fallback = total_rects > 200
+        && size_left >= 80
+        && size_right >= 80
+        && size_balance >= 0.55
+        && primary_balance <= 0.35
+        && kept_primary + 120 <= kept_size_only;
+
+    let used_fallback = sparse_fallback || skew_fallback;
     let filtered = if used_fallback {
+        if sparse_fallback {
+            log::debug!(
+                "target detection fallback (sparse): primary kept {kept_primary}/{total_rects} ({:.2}%), size-only would keep {kept_size_only}; retrying with size-only filter",
+                primary_ratio * 100.0
+            );
+        }
+        if skew_fallback {
+            log::debug!(
+                "target detection fallback (skew): primary L/R={primary_left}/{primary_right} (balance {:.2}), size-only L/R={size_left}/{size_right} (balance {:.2}); retrying with size-only filter",
+                primary_balance,
+                size_balance
+            );
+        }
         log::debug!(
-            "target detection fallback: primary kept {kept_primary}/{total_rects} ({:.2}%), size-only would keep {kept_size_only}; retrying with size-only filter",
-            primary_ratio * 100.0
+            "target detection: keeping size-only filter with {} candidates left",
+            kept_size_only
         );
         filtered_size_only.clone()
     } else {
+        log::debug!(
+            "target detection: primary kept {kept_primary}/{total_rects} ({:.2}%), size-only would keep {kept_size_only}; keeping primary filter",
+            primary_ratio * 100.0
+        );
         filtered_primary.clone()
     };
 

@@ -384,7 +384,6 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandState {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
-        log::debug!("WLPointerEvent::{:?}", &event);
         match event {
             wl_pointer::Event::Enter {
                 serial, 
@@ -1047,46 +1046,4 @@ pub fn create_overlay(
         layer_surface,
         shm_buffer,
     })
-}
-
-/// Move the virtual pointer to absolute coordinates within the compositor's
-/// logical coordinate space.
-///
-/// The zwlr_virtual_pointer_v1.motion_absolute protocol works as follows:
-///   position = (x / x_extent, y / y_extent)  →  normalised 0,1 range
-/// So we pass pixel coordinates relative to the bounding-box origin,
-/// with the bounding-box dimensions as extents.
-pub fn warp_pointer(
-    state: &WaylandState,
-    x: f64,
-    y: f64,
-) {
-    if let Some(ref vptr) = state.vptr {
-        // Compute the bounding box of all monitors (may have negative offsets)
-        let min_x = state.monitors.iter().map(|m| m.x).min().unwrap_or(0);
-        let min_y = state.monitors.iter().map(|m| m.y).min().unwrap_or(0);
-        let max_x = state.monitors.iter().map(|m| m.x + m.width).max().unwrap_or(1);
-        let max_y = state.monitors.iter().map(|m| m.y + m.height).max().unwrap_or(1);
-
-        let extent_w = (max_x - min_x) as u32;
-        let extent_h = (max_y - min_y) as u32;
-
-        // Translate absolute compositor coordinates to bounding-box-relative
-        let rel_x = (x - min_x as f64) as u32;
-        let rel_y = (y - min_y as f64) as u32;
-
-        let now = {
-            let dur = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default();
-            dur.as_millis() as u32
-        };
-
-        log::info!(
-            "warp_pointer: abs=({x},{y}) rel=({rel_x},{rel_y}) extent=({extent_w},{extent_h})"
-        );
-
-        vptr.motion_absolute(now, rel_x, rel_y, extent_w, extent_h);
-        vptr.frame();
-    }
 }
