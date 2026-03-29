@@ -20,7 +20,7 @@ wayland-protocols-wlr = { version = "0.3", features = ["client"] }
 wayland-backend = "0.3"
 cairo-rs = { version = "0.20", features = ["png"] }
 xkbcommon = { version = "0.8", features = ["wayland"] }
-rustix = { version = "0.38", features = ["shm", "fs", "mm"] }
+rustix = { version = "0.38", features = ["shm", "fs", "mm", "event"] }
 memmap2 = "0.9"
 clap = { version = "4", features = ["derive"] }
 log = "0.4"

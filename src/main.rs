@@ -28,6 +28,11 @@ use std::time::{Duration, Instant};
 use wayland::KeyState;
 use wayland_client::protocol::wl_output::Transform;
 
+// see pump_wayland_nonblocking , seems necessary but not entirely sure why 
+// it fixed laggy/unresponsive behavior of pointer in normal mode 
+use rustix::event::{self, PollFd};
+use rustix::io::Errno;
+
 // ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
@@ -350,7 +355,43 @@ fn run_normal_mode(
     let mut last_pointer_motion_sample: Option<(f64, f64)> = None;
     let base_speed = cfg.speed as f64 / 60.0; // pixels per frame at 60fps
     let mut last_frame = Instant::now();
-    let mut held_keys: std::collections::HashSet<u32> = std::collections::HashSet::new();
+    let target_frame = Duration::from_micros(8_333); // ~120fps
+    let mut held_keys: HashMap<u32, HeldKeyRole> = HashMap::new();
+
+    // very unsure about what this is doing (🤖) but it works 🤷... 
+    let pump_wayland_nonblocking =
+        |state: &mut wayland::WaylandState,
+         queue: &mut wayland_client::EventQueue<wayland::WaylandState>|
+         -> Result<()> {
+            if let Some(guard) = queue.prepare_read() {
+                let fd = guard.connection_fd();
+                let mut fds = [PollFd::new(
+                    &fd,
+                    event::PollFlags::IN | event::PollFlags::ERR,
+                )];
+
+                match event::poll(&mut fds, 0) {
+                    Ok(ready) if ready > 0 => {
+                        let _ = guard.read();
+                    }
+                    Ok(_) => {
+                        // No compositor events ready right now; drop guard to cancel read.
+                    }
+                    Err(Errno::INTR) => {
+                        // Interrupted syscall: try again next frame.
+                    }
+                    Err(err) => {
+                        return Err(anyhow::anyhow!(
+                            "failed polling Wayland socket in normal mode: {err}"
+                        ));
+                    }
+                }
+            }
+
+            queue.dispatch_pending(state)?;
+            queue.flush()?;
+            Ok(())
+        };
 
     // Draw a small cursor indicator
     let draw_cursor = |overlay: &mut wayland::Overlay, cx: f64, cy: f64| -> Result<()> {
@@ -421,11 +462,7 @@ fn run_normal_mode(
             }
         }
 
-        if let Some(guard) = queue.prepare_read() {
-            let _ = guard.read();
-        }
-        queue.dispatch_pending(state)?;
-        queue.flush()?;
+        pump_wayland_nonblocking(state, queue)?;
         std::thread::sleep(Duration::from_millis(1));
     }
 
@@ -716,11 +753,11 @@ fn run_normal_mode(
             queue.flush()?;
         }
 
-        // ~120fps frame rate cap
-        std::thread::sleep(Duration::from_millis(8));
+        if let Some(remaining) = target_frame.checked_sub(frame_start.elapsed()) {
+            std::thread::sleep(remaining);
+        }
     }
 }
-
 
 fn runtime_features_string() -> &'static str {
     #[cfg(feature = "opencv")]
