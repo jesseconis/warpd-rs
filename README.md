@@ -12,7 +12,7 @@ Wayland-first implementation that targets wlroots-based compositors
 
 1. A grid of labelled boxes appears over the screen per the hint_source value
 2. Type characters to filter — matching prefix is dimmed, remaining chars highlighted
-3. When one hint remains the cursor warps to its centre, optionally finishes by activating LMB   
+3. When one hint remains the cursor warps to its centre, and activates LMB only if `click_after_warp = true` (default)   
 4. Press **Escape** to cancel, **Backspace** to undo a character
 
 Hint targets are selected by `hint_source`:
@@ -21,10 +21,10 @@ Hint targets are selected by `hint_source`:
 - `detect`: run OpenCV-based target detection on a screencopy frame    building
 
 
-### Static (`hint_source=static` in config)
+### Static (`hint_source=static`)
    <img src="docs/tile_static.gif" height="450px"/>
 
-### Detect (`hint_source=detect` in config)
+### Detect (`hint_source=detect`)
    <img src="docs/tile_detect.gif" height="450px"/>
 
 ### Grid (`--grid`)
@@ -33,7 +33,8 @@ Hint targets are selected by `hint_source`:
 1. The screen is divided into four quadrants with a crosshair
 2. Press the configured grid keys (`grid_quadrant_keys`, default **u / i / j / k** for TL/TR/BL/BR) to subdivide
 3. Repeat until precise — the cursor warps when the cell is small enough
-4. Press the configured left-click key (`buttons[0]`, default **m**) at the current centre, **Escape** to cancel
+4. Automatic warp-to-centre can also activate LMB when `click_after_warp = true` (default)
+5. Press the configured left-click key (`buttons[0]`, default **m**) at the current centre, **Escape** to cancel
 
 ### Normal (`--normal`)
 

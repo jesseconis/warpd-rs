@@ -1,39 +1,38 @@
-# warpd-rs configuration
-# Place at: ~/.config/warpd-rs/config.toml
-
-# Characters used for hint labels — order matters.
-# With 26 chars you get 26 single-char + 676 two-char labels = 702 hints.
-# Dvorak home-row example:
-# hint_chars = "aoeuidhtns"
-hint_source = "grid" # grid | stdin | detect
+click_after_warp = true
+hint_source = "static"
 hint_chars = "abcdefghijklmnopqrstuvwxyz"
-
-# -- Hint mode visuals (Catppuccin Mocha defaults) --
-hint_bgcolor   = "#1e1e2e"
-hint_bg_opacity = 0.5      # 0.0 (fully transparent) to 1.0 (fully opaque)
-hint_fgcolor   = "#cdd6f4"
+hint_bgcolor = "#1e1e2e"
+hint_bg_opacity = 1.0
+hint_fgcolor = "#cdd6f4"
 hint_border_radius = 4.0
-hint_font      = "monospace"
+hint_font = "monospace"
 hint_font_size = 16.0
-hint_grid_gap  = 80          # pixels between hint centres
-
-# -- Grid mode --
-grid_color       = "#89b4fa"
+hint_grid_gap = 80
+grid_color = "#89b4fa"
 grid_border_size = 2
-grid_font_size   = 36.0        # quadrant label size in pixels
-grid_min_size    = 270.0       # auto-select when both width/height are below this
-grid_quadrant_keys = ["u", "i", "j", "k"] # TL, TR, BL, BR order
-
-# -- Normal mode --
-speed        = 420           # pixels/sec base speed
-acceleration = 700           # unused for now, reserved
-normal_move_keys = ["h", "j", "k", "l"] # left, down, up, right order
-speed_modifier_key = "Shift"   # Shift_L + Shift_R boost speed
-speed_modifier_multiplier = 2.0 # multiplier applied while modifier is held
-
-# -- Mouse buttons (left, middle, right) --
-buttons = ["m", ",", "."]
-
-# -- Cursor indicator (normal mode) --
+grid_font_size = 36.0
+grid_min_size = 270.0
+grid_quadrant_keys = [
+    "u",
+    "i",
+    "j",
+    "k",
+]
+speed = 220
+acceleration = 700
+normal_move_keys = [
+    "h",
+    "j",
+    "k",
+    "l",
+]
+speed_modifier_key = "SHIFT"
+speed_modifier_multiplier = 5.0
 cursor_color = "#f38ba8"
-cursor_size  = 9
+cursor_size = 7
+crosshair_line_width = 2
+buttons = [
+    "m",
+    ",",
+    ".",
+]
