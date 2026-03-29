@@ -22,10 +22,17 @@ grid_color       = "#89b4fa"
 grid_border_size = 2
 grid_font_size   = 36.0        # quadrant label size in pixels
 grid_min_size    = 270.0       # auto-select when both width/height are below this
+grid_quadrant_keys = ["u", "i", "j", "k"] # TL, TR, BL, BR order
 
 # -- Normal mode --
 speed        = 420           # pixels/sec base speed
 acceleration = 700           # unused for now, reserved
+normal_move_keys = ["h", "j", "k", "l"] # left, down, up, right order
+speed_modifier_key = "Shift"   # Shift_L + Shift_R boost speed
+speed_modifier_multiplier = 2.0 # multiplier applied while modifier is held
+
+# -- Mouse buttons (left, middle, right) --
+buttons = ["m", ",", "."]
 
 # -- Cursor indicator (normal mode) --
 cursor_color = "#f38ba8"
