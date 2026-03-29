@@ -175,7 +175,9 @@ fn run_hint_mode(
                     // Now safe to tear down the overlay
                     overlay.layer_surface.destroy();
                     overlay.surface.destroy();
-                    click_button(state, 1);
+                    if cfg.click_after_warp {
+                        click_button(state, 1);
+                    }
                     queue.flush()?;
 
                     // log::info!("hint selected → warp to ({abs_x}, {abs_y})");
@@ -249,7 +251,9 @@ fn run_grid_mode(
                     queue.roundtrip(state)?;
                     overlay.layer_surface.destroy();
                     overlay.surface.destroy();
-                    click_button(state, 1);
+                    if cfg.click_after_warp {
+                        click_button(state, 1);
+                    }
                     queue.flush()?;
                     return Ok(());
                 }
