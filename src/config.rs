@@ -1,9 +1,9 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::path::PathBuf;
 
 /// All configurable options for warpd-rs, matching the original warpd config keys.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
     // -- Hint mode visuals --
@@ -33,17 +33,27 @@ pub struct Config {
     pub grid_font_size: f64,
     /// Minimum width/height (in pixels) before grid auto-selects centre.
     pub grid_min_size: f64,
+    /// Quadrant selection keys for grid mode (TL, TR, BL, BR order).
+    pub grid_quadrant_keys: [String; 4],
 
-    // -- Normal mode movement --
+    // -- Normal mode --
     pub speed: u32,
     pub acceleration: u32,
+    /// Normal mode movement keys (left, down, up, right order).
+    pub normal_move_keys: [String; 4],
+    /// Key binding that boosts cursor speed when held.
+    pub speed_modifier_key: String,
+    /// Multiplier applied when the speed modifier is active.
+    pub speed_modifier_multiplier: f64,
+
+    // -- normal mode appearance 
+    pub cursor_color: String,
+    pub cursor_size: u32,
+    pub crosshair_line_width: u32,
 
     // -- Mouse buttons (warpd convention: left, middle, right) --
     pub buttons: [String; 3],
 
-    // -- Colours / misc --
-    pub cursor_color: String,
-    pub cursor_size: u32,
 }
 
 impl Default for Config {
@@ -63,12 +73,17 @@ impl Default for Config {
             grid_border_size: 2,
             grid_font_size: 36.0,
             grid_min_size: 270.0,
+            grid_quadrant_keys: ["u".into(), "i".into(), "j".into(), "k".into()],
 
             speed: 220,
             acceleration: 700,
+            normal_move_keys: ["h".into(), "j".into(), "k".into(), "l".into()],
+            speed_modifier_key: "SHIFT".into(),
+            speed_modifier_multiplier: 5.0,
 
             buttons: ["m".into(), ",".into(), ".".into()],
 
+            crosshair_line_width: 2,
             cursor_color: "#f38ba8".into(),
             cursor_size: 7,
         }
@@ -85,6 +100,7 @@ impl Config {
                 Ok(text) => match toml::from_str::<Config>(&text) {
                     Ok(cfg) => {
                         log::info!("loaded config from {}", path.display());
+                        log::debug!("{:#?}", cfg);
                         return cfg;
                     }
                     Err(e) => {
@@ -106,8 +122,7 @@ impl Config {
             if let Some(xdg) = dirs::config_dir() {
                 v.push(xdg.join("warpd-rs").join("config.toml"));
             }
-            let home_cfg = dirs::home_dir()
-                .map(|h| h.join(".config/warpd-rs/config.toml"));
+            let home_cfg = dirs::home_dir().map(|h| h.join(".config/warpd-rs/config.toml"));
             if let Some(p) = home_cfg {
                 if !v.contains(&p) {
                     v.push(p);
@@ -122,6 +137,7 @@ impl Config {
                     Ok(text) => match toml::from_str::<Config>(&text) {
                         Ok(cfg) => {
                             log::info!("loaded config from {}", path.display());
+                            log::debug!("{:#?}", cfg);
                             return cfg;
                         }
                         Err(e) => {
@@ -138,6 +154,16 @@ impl Config {
         log::info!("no config file found, using defaults");
         log::debug!("{:#?}", Self::default());
         Config::default()
+    }
+
+    pub fn create_config(path: &Path) -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let default_cfg = Config::default();
+        let toml_str = toml::to_string_pretty(&default_cfg).expect("failed to serialize default config");
+        std::fs::write(path, toml_str)?;
+        Ok(())
     }
 }
 

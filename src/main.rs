@@ -11,22 +11,22 @@
 ///   bind = SUPER ALT, x, exec, warpd-rs --hint
 ///   bind = SUPER ALT, g, exec, warpd-rs --grid
 ///   bind = SUPER ALT, c, exec, warpd-rs --normal
-
 mod config;
 mod hint;
 mod input;
+mod pointer;
 #[cfg(feature = "opencv")]
 mod target_detection;
 mod wayland;
-mod pointer;
 
 use anyhow::Result;
 use clap::Parser;
-use wayland_client::protocol::wl_output::Transform;
+use pointer::{click_button, resolve_initial_pointer_position, surface_pointer_pos, warp_pointer};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use wayland::KeyState;
-use pointer::{resolve_initial_pointer_position, surface_pointer_pos, click_button, warp_pointer};
+use wayland_client::protocol::wl_output::Transform;
 
 // ---------------------------------------------------------------------------
 // CLI
@@ -58,6 +58,11 @@ struct Cli {
     /// Path to config TOML file. If set, default config search locations are skipped.
     #[arg(long)]
     config: Option<PathBuf>,
+
+    /// Generate a default config file at the specified path, then exit.
+    /// If the file already exists, it will be overwritten.
+    #[arg(long)]
+    generate_config: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -124,7 +129,10 @@ fn run_hint_mode(
         }
         "static" => hint::generate_hints(&monitor, cfg),
         _ => {
-            log::warn!("unknown hint_source '{}', falling back to grid", cfg.hint_source);
+            log::warn!(
+                "unknown hint_source '{}', falling back to grid",
+                cfg.hint_source
+            );
             hint::generate_hints(&monitor, cfg)
         }
     };
@@ -193,6 +201,14 @@ fn run_grid_mode(
     let monitor = wayland::find_focused_monitor(state, queue)?;
     let mut overlay = wayland::create_overlay(state, queue, &monitor)?;
 
+    let grid_keysyms = input::bindings_to_keysyms(
+        &cfg.grid_quadrant_keys,
+        &input::DEFAULT_GRID_QUADRANT_KEYSYMS,
+        "grid_quadrant_keys",
+    );
+    let button_keysyms =
+        input::bindings_to_keysyms(&cfg.buttons, &input::DEFAULT_BUTTON_KEYSYMS, "buttons");
+
     let mut sel = hint::GridSelection::new(&monitor);
 
     hint::draw_grid(&mut overlay, &sel, cfg)?;
@@ -205,60 +221,51 @@ fn run_grid_mode(
             if event.state != KeyState::Pressed {
                 continue;
             }
-            match event.sym {
-                input::keysyms::ESCAPE => {
-                    overlay.layer_surface.destroy();
-                    overlay.surface.destroy();
-                    queue.flush()?;
-                    return Ok(());
-                }
-                // Quadrant selection
-                input::keysyms::U | input::keysyms::I
-                | input::keysyms::J | input::keysyms::K => {
-                    let ch = match event.sym {
-                        input::keysyms::U => 'u',
-                        input::keysyms::I => 'i',
-                        input::keysyms::J => 'j',
-                        input::keysyms::K => 'k',
-                        _ => unreachable!(),
-                    };
-                    sel.subdivide(ch);
 
-                    /*
-                    If the grid is small enough, warp
-                    */
-                    if sel.w < cfg.grid_min_size && sel.h < cfg.grid_min_size {
-                        let (cx, cy) = sel.centre();
-                        let abs_x = monitor.x as f64 + cx;
-                        let abs_y = monitor.y as f64 + cy;
-                        warp_pointer(state, abs_x, abs_y);
-                        queue.flush()?;
-                        queue.roundtrip(state)?;
-                        overlay.layer_surface.destroy();
-                        overlay.surface.destroy();
-                        click_button(state, 1);
-                        queue.flush()?;
-                        //log::info!("grid selected → warp to ({abs_x}, {abs_y})");
-                        return Ok(());
-                    }
+            if event.sym == input::keysyms::ESCAPE {
+                overlay.layer_surface.destroy();
+                overlay.surface.destroy();
+                queue.flush()?;
+                return Ok(());
+            }
 
-                    hint::draw_grid(&mut overlay, &sel, cfg)?;
-                    queue.flush()?;
-                }
-                input::keysyms::M => {
+            if let Some(idx) = grid_keysyms.iter().position(|&sym| sym == event.sym) {
+                sel.subdivide(idx);
+
+                /*
+                If the grid is small enough, warp
+                */
+                if sel.w < cfg.grid_min_size && sel.h < cfg.grid_min_size {
                     let (cx, cy) = sel.centre();
                     let abs_x = monitor.x as f64 + cx;
                     let abs_y = monitor.y as f64 + cy;
                     warp_pointer(state, abs_x, abs_y);
-                    click_button(state, 1);
                     queue.flush()?;
                     queue.roundtrip(state)?;
                     overlay.layer_surface.destroy();
                     overlay.surface.destroy();
+                    click_button(state, 1);
                     queue.flush()?;
                     return Ok(());
                 }
-                _ => {}
+
+                hint::draw_grid(&mut overlay, &sel, cfg)?;
+                queue.flush()?;
+                continue;
+            }
+
+            if event.sym == button_keysyms[0] {
+                let (cx, cy) = sel.centre();
+                let abs_x = monitor.x as f64 + cx;
+                let abs_y = monitor.y as f64 + cy;
+                warp_pointer(state, abs_x, abs_y);
+                click_button(state, 1);
+                queue.flush()?;
+                queue.roundtrip(state)?;
+                overlay.layer_surface.destroy();
+                overlay.surface.destroy();
+                queue.flush()?;
+                return Ok(());
             }
         }
     }
@@ -269,8 +276,66 @@ fn run_normal_mode(
     queue: &mut wayland_client::EventQueue<wayland::WaylandState>,
     cfg: &config::Config,
 ) -> Result<()> {
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum HeldKeyRole {
+        MoveLeft,
+        MoveDown,
+        MoveUp,
+        MoveRight,
+        SpeedModifier,
+    }
+
+    let normalize_keysym = |sym: u32| -> u32 {
+        if (b'A' as u32..=b'Z' as u32).contains(&sym) {
+            sym + 32
+        } else {
+            sym
+        }
+    };
+
     let mut monitor = wayland::find_focused_monitor(state, queue)?;
     let mut overlay = wayland::create_overlay(state, queue, &monitor)?;
+
+    let move_keysyms = input::bindings_to_keysyms(
+        &cfg.normal_move_keys,
+        &input::DEFAULT_NORMAL_MOVE_KEYSYMS,
+        "normal_move_keys",
+    );
+    let [left_key, down_key, up_key, right_key] = move_keysyms.map(normalize_keysym);
+    let button_keysyms =
+        input::bindings_to_keysyms(&cfg.buttons, &input::DEFAULT_BUTTON_KEYSYMS, "buttons")
+            .map(normalize_keysym);
+    let speed_modifier_syms: Vec<u32> = {
+        let binding = cfg.speed_modifier_key.trim();
+        if binding.eq_ignore_ascii_case("shift") {
+            input::SHIFT_KEYS
+                .iter()
+                .copied()
+                .map(normalize_keysym)
+                .collect()
+        } else if let Some(sym) = input::binding_to_keysym(binding) {
+            vec![normalize_keysym(sym)]
+        } else {
+            log::warn!(
+                "invalid speed_modifier_key '{}'; defaulting to both Shift keys",
+                cfg.speed_modifier_key
+            );
+            input::SHIFT_KEYS
+                .iter()
+                .copied()
+                .map(normalize_keysym)
+                .collect()
+        }
+    };
+    let speed_modifier_multiplier = if cfg.speed_modifier_multiplier > 0.0 {
+        cfg.speed_modifier_multiplier
+    } else {
+        log::warn!(
+            "speed_modifier_multiplier must be > 0 (got {}); using 2.0",
+            cfg.speed_modifier_multiplier
+        );
+        2.0
+    };
 
     let point_in_monitor = |x: f64, y: f64, m: &wayland::Monitor, tol: f64| {
         x >= (m.x as f64 - tol)
@@ -313,12 +378,18 @@ fn run_normal_mode(
         let (r, g, b, _) = config::parse_hex_color(&cfg.cursor_color);
         cr.set_operator(cairo::Operator::Over);
         cr.set_source_rgba(r, g, b, 0.9);
-        cr.arc(cx, cy, cfg.cursor_size as f64, 0.0, 2.0 * std::f64::consts::PI);
+        cr.arc(
+            cx,
+            cy,
+            cfg.cursor_size as f64,
+            0.0,
+            2.0 * std::f64::consts::PI,
+        );
         cr.fill()?;
 
         // Crosshair lines
         cr.set_source_rgba(r, g, b, 0.3);
-        cr.set_line_width(1.0);
+        cr.set_line_width(cfg.crosshair_line_width as f64);
         cr.move_to(cx, 0.0);
         cr.line_to(cx, height as f64);
         cr.stroke()?;
@@ -329,7 +400,9 @@ fn run_normal_mode(
         drop(cr);
         surface.flush();
 
-        overlay.surface.attach(Some(&overlay.shm_buffer.buffer), 0, 0);
+        overlay
+            .surface
+            .attach(Some(&overlay.shm_buffer.buffer), 0, 0);
         overlay.surface.damage_buffer(0, 0, width, height);
         overlay.surface.commit();
         Ok(())
@@ -442,14 +515,14 @@ fn run_normal_mode(
         // Normalize for outputs that advertise transforms (e.g. horizontal flip).
         let tx = monitor.transform;
         let (transform_case, nx, ny) = match tx {
-           Transform::Normal => ("Normal", cx, cy),
-           Transform::_90 => ("_90", cy, max_x - cx),
-           Transform::_180 => ("_180", max_x - cx, max_y - cy),
-           Transform::_270 => ("_270", max_y - cy, cx),
-           Transform::Flipped => ("Flipped", max_x - cx, cy),
-           Transform::Flipped90 => ("Flipped90", max_y - cy, max_x - cx),
-           Transform::Flipped180 => ("Flipped180", cx, max_y - cy),
-           Transform::Flipped270 => ("Flipped270", cy, cx),
+            Transform::Normal => ("Normal", cx, cy),
+            Transform::_90 => ("_90", cy, max_x - cx),
+            Transform::_180 => ("_180", max_x - cx, max_y - cy),
+            Transform::_270 => ("_270", max_y - cy, cx),
+            Transform::Flipped => ("Flipped", max_x - cx, cy),
+            Transform::Flipped90 => ("Flipped90", max_y - cy, max_x - cx),
+            Transform::Flipped180 => ("Flipped180", cx, max_y - cy),
+            Transform::Flipped270 => ("Flipped270", cy, cx),
             _ => ("Unknown/Fallback", cx, cy),
         };
         log::debug!(
@@ -469,132 +542,172 @@ fn run_normal_mode(
     }
 
     loop {
+        let frame_start = Instant::now();
+
         // We use prepare_read + read_events + dispatch_pending so we don't
         // block forever (we need to process held-key movement each frame).
-        if let Some(guard) = queue.prepare_read() {
-            // Non-blocking read: if nothing available, that's fine
-            let _ = guard.read();
-        }
-        queue.dispatch_pending(state)?;
-        queue.flush()?;
+        pump_wayland_nonblocking(state, queue)?;
 
         let mut moved = false;
+        let keyboard_steering_active = held_keys.values().any(|role| {
+            matches!(
+                role,
+                HeldKeyRole::MoveLeft
+                    | HeldKeyRole::MoveRight
+                    | HeldKeyRole::MoveUp
+                    | HeldKeyRole::MoveDown
+            )
+        });
 
         // Keep crosshair bound to physical pointer movement while in normal mode.
-        if let Some((px, py, source)) = surface_pointer_pos(state, &overlay.surface)
-        {
-            if source == wayland::PointerPosSource::Motion {
-                let changed = last_pointer_motion_sample
-                    .map(|(lx, ly)| (lx - px).abs() > 0.01 || (ly - py).abs() > 0.01)
-                    .unwrap_or(true);
+        if !keyboard_steering_active {
+            if let Some((px, py, source)) = surface_pointer_pos(state, &overlay.surface) {
+                if source == wayland::PointerPosSource::Motion {
+                    let changed = last_pointer_motion_sample
+                        .map(|(lx, ly)| (lx - px).abs() > 0.01 || (ly - py).abs() > 0.01)
+                        .unwrap_or(true);
 
-                if changed {
-                    let max_x = monitor.width as f64 - 1.0;
-                    let max_y = monitor.height as f64 - 1.0;
-                    if (0.0..=max_x).contains(&px) && (0.0..=max_y).contains(&py) {
-                        cx = px;
-                        cy = py;
-                        moved = true;
+                    if changed {
+                        let max_x = monitor.width as f64 - 1.0;
+                        let max_y = monitor.height as f64 - 1.0;
+                        if (0.0..=max_x).contains(&px) && (0.0..=max_y).contains(&py) {
+                            cx = px;
+                            cy = py;
+                            moved = true;
+                        }
+                        last_pointer_motion_sample = Some((px, py));
                     }
-                    last_pointer_motion_sample = Some((px, py));
                 }
             }
         }
 
         // Collect all pending key events
         while let Ok(event) = state.key_rx.try_recv() {
+            let event_sym = normalize_keysym(event.sym);
+
+            let key_role = if event_sym == left_key {
+                Some(HeldKeyRole::MoveLeft)
+            } else if event_sym == down_key {
+                Some(HeldKeyRole::MoveDown)
+            } else if event_sym == up_key {
+                Some(HeldKeyRole::MoveUp)
+            } else if event_sym == right_key {
+                Some(HeldKeyRole::MoveRight)
+            } else if speed_modifier_syms.contains(&event_sym) {
+                Some(HeldKeyRole::SpeedModifier)
+            } else {
+                None
+            };
+
             match event.state {
-                KeyState::Pressed => { held_keys.insert(event.sym); }
-                KeyState::Released => { held_keys.remove(&event.sym); }
+                KeyState::Pressed => {
+                    if let Some(role) = key_role {
+                        held_keys.entry(event.key).or_insert(role);
+                    }
+                }
+                KeyState::Released => {
+                    held_keys.remove(&event.key);
+                }
                 _ => {}
             }
 
             if event.state == KeyState::Pressed {
-                match event.sym {
-                    input::keysyms::ESCAPE => {
-                        overlay.layer_surface.destroy();
-                        overlay.surface.destroy();
-                        queue.flush()?;
-                        return Ok(());
-                    }
-                    // Mouse buttons
-                    input::keysyms::M => {
-                        let abs_x = monitor.x as f64 + cx;
-                        let abs_y = monitor.y as f64 + cy;
-                        warp_pointer(state, abs_x, abs_y);
-                        queue.flush()?;
-                        queue.roundtrip(state)?;
-                        overlay.layer_surface.destroy();
-                        overlay.surface.destroy();
-                        click_button(state, 1);
-                        queue.flush()?;
-                        return Ok(());
-                    }
-                    input::keysyms::COMMA => {
-                        let abs_x = monitor.x as f64 + cx;
-                        let abs_y = monitor.y as f64 + cy;
-                        warp_pointer(state, abs_x, abs_y);
-                        click_button(state, 2);
-                        queue.flush()?;
-                        queue.roundtrip(state)?;
-                        overlay.layer_surface.destroy();
-                        overlay.surface.destroy();
-                        queue.flush()?;
-                        return Ok(());
-                    }
-                    input::keysyms::PERIOD => {
-                        let abs_x = monitor.x as f64 + cx;
-                        let abs_y = monitor.y as f64 + cy;
-                        warp_pointer(state, abs_x, abs_y);
-                        // 👀 -- why did I disable this??   
-                        // wayland::click_button(state, 3);
-                        queue.flush()?;
-                        queue.roundtrip(state)?;
-                        overlay.layer_surface.destroy();
-                        overlay.surface.destroy();
-                        click_button(state, 3);
-                        queue.flush()?;
-                        return Ok(());
-                    }
-                    // Switch to hint mode
-                    input::keysyms::X => {
-                        overlay.layer_surface.destroy();
-                        overlay.surface.destroy();
-                        queue.flush()?;
-                        return run_hint_mode(state, queue, cfg);
-                    }
-                    // Switch to grid mode
-                    input::keysyms::G => {
-                        overlay.layer_surface.destroy();
-                        overlay.surface.destroy();
-                        queue.flush()?;
-                        return run_grid_mode(state, queue, cfg);
-                    }
-                    _ => {}
+                if event_sym == input::keysyms::ESCAPE {
+                    overlay.layer_surface.destroy();
+                    overlay.surface.destroy();
+                    queue.flush()?;
+                    return Ok(());
+                }
+
+                if event_sym == button_keysyms[0] {
+                    let abs_x = monitor.x as f64 + cx;
+                    let abs_y = monitor.y as f64 + cy;
+                    warp_pointer(state, abs_x, abs_y);
+                    queue.flush()?;
+                    queue.roundtrip(state)?;
+                    overlay.layer_surface.destroy();
+                    overlay.surface.destroy();
+                    click_button(state, 1);
+                    queue.flush()?;
+                    return Ok(());
+                }
+
+                if event_sym == button_keysyms[1] {
+                    let abs_x = monitor.x as f64 + cx;
+                    let abs_y = monitor.y as f64 + cy;
+                    warp_pointer(state, abs_x, abs_y);
+                    click_button(state, 2);
+                    queue.flush()?;
+                    queue.roundtrip(state)?;
+                    overlay.layer_surface.destroy();
+                    overlay.surface.destroy();
+                    queue.flush()?;
+                    return Ok(());
+                }
+
+                if event_sym == button_keysyms[2] {
+                    let abs_x = monitor.x as f64 + cx;
+                    let abs_y = monitor.y as f64 + cy;
+                    warp_pointer(state, abs_x, abs_y);
+                    queue.flush()?;
+                    queue.roundtrip(state)?;
+                    overlay.layer_surface.destroy();
+                    overlay.surface.destroy();
+                    click_button(state, 3);
+                    queue.flush()?;
+                    return Ok(());
+                }
+
+                if event_sym == input::keysyms::X {
+                    overlay.layer_surface.destroy();
+                    overlay.surface.destroy();
+                    queue.flush()?;
+                    return run_hint_mode(state, queue, cfg);
+                }
+
+                if event_sym == input::keysyms::G {
+                    overlay.layer_surface.destroy();
+                    overlay.surface.destroy();
+                    queue.flush()?;
+                    return run_grid_mode(state, queue, cfg);
                 }
             }
         }
 
         // Continuous movement for held directional keys
         let now = Instant::now();
-        let dt = now.duration_since(last_frame).as_secs_f64();
+        let dt = now.duration_since(last_frame).as_secs_f64().min(1.0 / 20.0);
         last_frame = now;
 
-        let speed = base_speed * dt * 60.0; // normalise to ~60fps
-        if held_keys.contains(&input::keysyms::H) {
-            cx = (cx - speed).max(0.0);
+        let mut frame_speed = base_speed * dt * 60.0; // normalise to ~60fps
+        let speed_modifier_active = held_keys
+            .values()
+            .any(|role| *role == HeldKeyRole::SpeedModifier);
+        if speed_modifier_active {
+            frame_speed *= speed_modifier_multiplier;
+        }
+
+        let moving_left = held_keys.values().any(|role| *role == HeldKeyRole::MoveLeft);
+        let moving_right = held_keys
+            .values()
+            .any(|role| *role == HeldKeyRole::MoveRight);
+        let moving_up = held_keys.values().any(|role| *role == HeldKeyRole::MoveUp);
+        let moving_down = held_keys.values().any(|role| *role == HeldKeyRole::MoveDown);
+
+        if moving_left {
+            cx = (cx - frame_speed).max(0.0);
             moved = true;
         }
-        if held_keys.contains(&input::keysyms::L) {
-            cx = (cx + speed).min(monitor.width as f64 - 1.0);
+        if moving_right {
+            cx = (cx + frame_speed).min(monitor.width as f64 - 1.0);
             moved = true;
         }
-        if held_keys.contains(&input::keysyms::K) {
-            cy = (cy - speed).max(0.0);
+        if moving_up {
+            cy = (cy - frame_speed).max(0.0);
             moved = true;
         }
-        if held_keys.contains(&input::keysyms::J) {
-            cy = (cy + speed).min(monitor.height as f64 - 1.0);
+        if moving_down {
+            cy = (cy + frame_speed).min(monitor.height as f64 - 1.0);
             moved = true;
         }
 
@@ -621,7 +734,6 @@ fn runtime_features_string() -> &'static str {
     }
 }
 
-
 /// ---------------------------------------------------------------------------
 /// Entry point
 /// ---------------------------------------------------------------------------
@@ -642,24 +754,8 @@ fn main() -> Result<()> {
         .format_timestamp(None)
         .init();
 
-    if !cli.hint && !cli.grid && !cli.normal {
-        eprintln!("warpd-rs: specify a mode: --hint, --grid, or --normal");
-        eprintln!("Bind in your compositor, e.g. for Hyprland:");
-        eprintln!("  bind = SUPER ALT, x, exec, warpd-rs --hint");
-        eprintln!("  bind = SUPER ALT, g, exec, warpd-rs --grid");
-        eprintln!("  bind = SUPER ALT, c, exec, warpd-rs --normal");
-        std::process::exit(1);
-    }
-
     let cfg = config::Config::load(cli.config.as_deref());
     let (mut state, mut queue) = wayland::connect()?;
-
-    // for m in &state.monitors {
-    //     log::info!(
-    //         "  {} — {}×{} @ ({}, {}) scale={}",
-    //         m.name, m.width, m.height, m.x, m.y, m.scale
-    //     );
-    // }
 
     if cli.hint {
         run_hint_mode(&mut state, &mut queue, &cfg)?;
@@ -667,6 +763,12 @@ fn main() -> Result<()> {
         run_grid_mode(&mut state, &mut queue, &cfg)?;
     } else if cli.normal {
         run_normal_mode(&mut state, &mut queue, &cfg)?;
+    }
+    else if cli.generate_config {
+        let pwd = std::env::current_dir()?;
+        let path =  pwd.join("config.toml");
+        config::Config::create_config(&path)?;
+        log::info!("Default config written to {}", pwd.display());
     }
 
     Ok(())
