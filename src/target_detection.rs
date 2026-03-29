@@ -43,7 +43,10 @@ fn grayscale_from_frame(frame: &CapturedFrame) -> Result<Mat> {
                 wl_shm::Format::Abgr8888 | wl_shm::Format::Xbgr8888 => (px[2], px[1], px[0]),
                 wl_shm::Format::Rgba8888 | wl_shm::Format::Rgbx8888 => (px[2], px[1], px[0]),
                 wl_shm::Format::Bgra8888 | wl_shm::Format::Bgrx8888 => (px[0], px[1], px[2]),
-                _ => bail!("unsupported wl_shm format for detection: {:?}", frame.format),
+                _ => bail!(
+                    "unsupported wl_shm format for detection: {:?}",
+                    frame.format
+                ),
             };
 
             // OpenCV COLOR_BGR2GRAY coefficients.
@@ -156,10 +159,7 @@ fn filter_rects(rects: &[LogicalRect], hierarchy: &[Vec4i]) -> Vec<bool> {
                     && (center_y - parent_center_y).abs() < 8.0
                 {
                     filtered[i] = true;
-                } else if (parent.h - parent.w).abs() < 5.0
-                    && parent.h < 40.0
-                    && parent.w < 40.0
-                {
+                } else if (parent.h - parent.w).abs() < 5.0 && parent.h < 40.0 && parent.w < 40.0 {
                     filtered[i] = true;
                 }
             }
@@ -182,11 +182,7 @@ fn filter_rects_size_only(rects: &[LogicalRect]) -> Vec<bool> {
         .collect()
 }
 
-fn kept_split_counts(
-    rects: &[LogicalRect],
-    filtered: &[bool],
-    split_x: f64,
-) -> (usize, usize) {
+fn kept_split_counts(rects: &[LogicalRect], filtered: &[bool], split_x: f64) -> (usize, usize) {
     let mut left = 0usize;
     let mut right = 0usize;
 
@@ -309,9 +305,21 @@ fn maybe_dump_debug(
     let final_kept = filtered_final.iter().filter(|f| !**f).count();
 
     let mut stats = String::new();
-    let _ = writeln!(&mut stats, "frame: {}x{} stride={} format={:?} y_invert={}", frame.width, frame.height, frame.stride, frame.format, frame.y_invert);
-    let _ = writeln!(&mut stats, "monitor: name={} pos=({}, {}) size={}x{} transform={:?}", monitor.name, monitor.x, monitor.y, monitor.width, monitor.height, monitor.transform);
-    let _ = writeln!(&mut stats, "pipeline: scale={scale:.4} kernel={}x{}", kx, ky);
+    let _ = writeln!(
+        &mut stats,
+        "frame: {}x{} stride={} format={:?} y_invert={}",
+        frame.width, frame.height, frame.stride, frame.format, frame.y_invert
+    );
+    let _ = writeln!(
+        &mut stats,
+        "monitor: name={} pos=({}, {}) size={}x{} transform={:?}",
+        monitor.name, monitor.x, monitor.y, monitor.width, monitor.height, monitor.transform
+    );
+    let _ = writeln!(
+        &mut stats,
+        "pipeline: scale={scale:.4} kernel={}x{}",
+        kx, ky
+    );
     let _ = writeln!(
         &mut stats,
         "rects: total={} kept_primary={} kept_size_only={} kept_final={} used_fallback={}",
@@ -329,13 +337,13 @@ fn maybe_dump_debug(
     let _ = writeln!(&mut stats, "- {}", rects_path.display());
 
     if let Err(e) = std::fs::write(&stats_path, stats) {
-        log::warn!("target-detect debug: cannot write {}: {e}", stats_path.display());
+        log::warn!(
+            "target-detect debug: cannot write {}: {e}",
+            stats_path.display()
+        );
     }
 
-    log::debug!(
-        "target detection debug dump written to {}",
-        dir.display()
-    );
+    log::debug!("target detection debug dump written to {}", dir.display());
 }
 
 pub fn detect_target_areas(frame: &CapturedFrame, monitor: &Monitor) -> Result<Vec<TargetArea>> {

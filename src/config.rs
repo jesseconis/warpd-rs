@@ -46,14 +46,13 @@ pub struct Config {
     /// Multiplier applied when the speed modifier is active.
     pub speed_modifier_multiplier: f64,
 
-    // -- normal mode appearance 
+    // -- normal mode appearance
     pub cursor_color: String,
     pub cursor_size: u32,
     pub crosshair_line_width: u32,
 
     // -- Mouse buttons (warpd convention: left, middle, right) --
     pub buttons: [String; 3],
-
 }
 
 impl Default for Config {
@@ -161,7 +160,8 @@ impl Config {
             std::fs::create_dir_all(parent)?;
         }
         let default_cfg = Config::default();
-        let toml_str = toml::to_string_pretty(&default_cfg).expect("failed to serialize default config");
+        let toml_str =
+            toml::to_string_pretty(&default_cfg).expect("failed to serialize default config");
         std::fs::write(path, toml_str)?;
         Ok(())
     }

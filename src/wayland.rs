@@ -1,3 +1,4 @@
+use anyhow::{bail, Context, Result};
 ///! Wayland backend: connection setup, output (monitor) discovery, shared-memory
 ///! surface allocation, layer-shell overlay management, and virtual pointer control.
 ///!
@@ -7,23 +8,20 @@
 ///!   • zxdg_output_manager_v1       – logical output geometry
 ///! These are available on Sway, Hyprland, and other wlroots compositors.
 use std::os::fd::{AsFd, OwnedFd};
-use anyhow::{bail, Context, Result};
 use wayland_client::protocol::{
-    wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_region, wl_registry, wl_seat, wl_shm,
-    wl_shm_pool, wl_surface,
+    wl_buffer, wl_compositor, wl_keyboard, wl_output, wl_pointer, wl_region, wl_registry, wl_seat,
+    wl_shm, wl_shm_pool, wl_surface,
 };
 use wayland_client::{
     globals::{registry_queue_init, GlobalListContents},
     Connection, Dispatch, EventQueue, QueueHandle,
 };
-use wayland_protocols::xdg::xdg_output::zv1::client::{
-    zxdg_output_manager_v1, zxdg_output_v1,
-};
-use wayland_protocols_wlr::layer_shell::v1::client::{
-    zwlr_layer_shell_v1, zwlr_layer_surface_v1,
-};
+use wayland_protocols::xdg::xdg_output::zv1::client::{zxdg_output_manager_v1, zxdg_output_v1};
+use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 #[cfg(feature = "opencv")]
-use wayland_protocols_wlr::screencopy::v1::client::{zwlr_screencopy_manager_v1, zwlr_screencopy_frame_v1};
+use wayland_protocols_wlr::screencopy::v1::client::{
+    zwlr_screencopy_frame_v1, zwlr_screencopy_manager_v1,
+};
 use wayland_protocols_wlr::virtual_pointer::v1::client::{
     zwlr_virtual_pointer_manager_v1, zwlr_virtual_pointer_v1,
 };
@@ -71,8 +69,8 @@ pub struct Overlay {
 /// A keyboard event delivered from Wayland.
 #[derive(Debug, Clone)]
 pub struct KeyEvent {
-    pub key: u32,       // Linux keycode (evdev)
-    pub sym: u32,       // XKB keysym
+    pub key: u32,        // Linux keycode (evdev)
+    pub sym: u32,        // XKB keysym
     pub state: KeyState, // pressed / released
     pub utf8: Option<String>,
 }
@@ -172,12 +170,24 @@ impl std::fmt::Debug for WaylandState {
             .field("pending_outputs", &self.pending_outputs)
             .field("keyboard", &self.keyboard)
             .field("pointer", &self.pointer)
-            .field("xkb_context", &self.xkb_context.as_ref().map(|_| "<xkb::Context>"))
-            .field("xkb_keymap", &self.xkb_keymap.as_ref().map(|_| "<xkb::Keymap>"))
-            .field("xkb_state", &self.xkb_state.as_ref().map(|_| "<xkb::State>"))
+            .field(
+                "xkb_context",
+                &self.xkb_context.as_ref().map(|_| "<xkb::Context>"),
+            )
+            .field(
+                "xkb_keymap",
+                &self.xkb_keymap.as_ref().map(|_| "<xkb::Keymap>"),
+            )
+            .field(
+                "xkb_state",
+                &self.xkb_state.as_ref().map(|_| "<xkb::State>"),
+            )
             .field("pointer_focus_surface", &self.pointer_focus_surface)
             .field("pointer_surface_pos", &self.pointer_surface_pos)
-            .field("pointer_surface_pos_source", &self.pointer_surface_pos_source)
+            .field(
+                "pointer_surface_pos_source",
+                &self.pointer_surface_pos_source,
+            )
             .field("surface_entered_output", &self.surface_entered_output)
             .field("vptr", &self.vptr)
             .field("layer_surface_configured", &self.layer_surface_configured)
@@ -214,7 +224,9 @@ impl WaylandState {
             pending_outputs: Vec::new(),
             keyboard: None,
             pointer: None,
-            xkb_context: Some(xkbcommon::xkb::Context::new(xkbcommon::xkb::CONTEXT_NO_FLAGS)),
+            xkb_context: Some(xkbcommon::xkb::Context::new(
+                xkbcommon::xkb::CONTEXT_NO_FLAGS,
+            )),
             xkb_keymap: None,
             xkb_state: None,
             pointer_focus_surface: None,
@@ -270,7 +282,9 @@ impl Dispatch<wl_output::WlOutput, ()> for WaylandState {
             wl_output::Event::Name { name } => {
                 pending.name = name;
             }
-            wl_output::Event::Geometry { x, y, transform, .. } => {
+            wl_output::Event::Geometry {
+                x, y, transform, ..
+            } => {
                 pending.x = x;
                 pending.y = y;
                 pending.transform = match transform {
@@ -288,7 +302,9 @@ impl Dispatch<wl_output::WlOutput, ()> for WaylandState {
             wl_output::Event::Done => {
                 pending.done = true;
             }
-            _ => {            log::debug!("WlOutputEvent::{:?}",event);}
+            _ => {
+                log::debug!("WlOutputEvent::{:?}", event);
+            }
         }
     }
 }
@@ -319,7 +335,9 @@ impl Dispatch<zxdg_output_v1::ZxdgOutputV1, usize> for WaylandState {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
-        let Some(pending) = state.pending_outputs.get_mut(*idx) else { return };
+        let Some(pending) = state.pending_outputs.get_mut(*idx) else {
+            return;
+        };
         match event {
             zxdg_output_v1::Event::LogicalPosition { x, y } => {
                 pending.x = x;
@@ -386,7 +404,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandState {
     ) {
         match event {
             wl_pointer::Event::Enter {
-                serial, 
+                serial,
                 surface,
                 surface_x,
                 surface_y,
@@ -419,7 +437,9 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandState {
                     state.pointer_surface_pos_source = None;
                 }
             }
-            _ => {log::debug!("WLPointerEvent::{:?}", event);}
+            _ => {
+                log::debug!("WLPointerEvent::{:?}", event);
+            }
         }
     }
 }
@@ -445,13 +465,10 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandState {
                 };
                 // mmap the keymap fd
                 unsafe {
-                    let map = memmap2::MmapOptions::new()
-                        .len(size as usize)
-                        .map(&fd)
-                        .ok();
+                    let map = memmap2::MmapOptions::new().len(size as usize).map(&fd).ok();
                     if let Some(map) = map {
-                        let keymap_str = std::str::from_utf8(&map[..size as usize - 1])
-                            .unwrap_or("");
+                        let keymap_str =
+                            std::str::from_utf8(&map[..size as usize - 1]).unwrap_or("");
                         let keymap = xkbcommon::xkb::Keymap::new_from_string(
                             ctx,
                             keymap_str.to_string(),
@@ -466,7 +483,11 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandState {
                     }
                 }
             }
-            wl_keyboard::Event::Key { key, state: key_state, .. } => {
+            wl_keyboard::Event::Key {
+                key,
+                state: key_state,
+                ..
+            } => {
                 let key_state = match key_state {
                     wayland_client::WEnum::Value(s) => s,
                     _ => return,
@@ -478,13 +499,14 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandState {
                     .as_ref()
                     .map(|s| s.key_get_one_sym(xkb_keycode).raw())
                     .unwrap_or(0);
-                let utf8 = state
-                    .xkb_state
-                    .as_ref()
-                    .and_then(|s| {
-                        let u = s.key_get_utf8(xkb_keycode);
-                        if u.is_empty() { None } else { Some(u) }
-                    });
+                let utf8 = state.xkb_state.as_ref().and_then(|s| {
+                    let u = s.key_get_utf8(xkb_keycode);
+                    if u.is_empty() {
+                        None
+                    } else {
+                        Some(u)
+                    }
+                });
                 let _ = state.key_tx.send(KeyEvent {
                     key,
                     sym,
@@ -500,14 +522,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for WaylandState {
                 ..
             } => {
                 if let Some(xkb_state) = state.xkb_state.as_mut() {
-                    xkb_state.update_mask(
-                        mods_depressed,
-                        mods_latched,
-                        mods_locked,
-                        0,
-                        0,
-                        group,
-                    );
+                    xkb_state.update_mask(mods_depressed, mods_latched, mods_locked, 0, 0, group);
                 }
             }
             _ => {}
@@ -540,11 +555,20 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for WaylandState {
         _conn: &Connection,
         _qh: &QueueHandle<Self>,
     ) {
-        {log::debug!("WlLayerSurfaceEvent::{:?}",event);};
-        if let zwlr_layer_surface_v1::Event::Configure { serial, width, height } = event {
+        {
+            log::debug!("WlLayerSurfaceEvent::{:?}", event);
+        };
+        if let zwlr_layer_surface_v1::Event::Configure {
+            serial,
+            width,
+            height,
+        } = event
+        {
             surface.ack_configure(serial);
             state.layer_surface_configured = true;
-            log::info!("layer surface configured (serial={serial}, width={width}, height={height})");
+            log::info!(
+                "layer surface configured (serial={serial}, width={width}, height={height})"
+            );
         };
     }
 }
@@ -563,7 +587,12 @@ impl Dispatch<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1, ()> for Wayla
 }
 
 #[cfg(feature = "opencv")]
-impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, std::sync::Arc<std::sync::Mutex<ScreencopyFrameState>>> for WaylandState {
+impl
+    Dispatch<
+        zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
+        std::sync::Arc<std::sync::Mutex<ScreencopyFrameState>>,
+    > for WaylandState
+{
     fn event(
         _state: &mut Self,
         _proxy: &zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1,
@@ -616,19 +645,59 @@ impl Dispatch<zwlr_screencopy_frame_v1::ZwlrScreencopyFrameV1, std::sync::Arc<st
 // ---------------------------------------------------------------------------
 
 impl Dispatch<wl_compositor::WlCompositor, ()> for WaylandState {
-    fn event(_: &mut Self, _: &wl_compositor::WlCompositor, _: wl_compositor::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &wl_compositor::WlCompositor,
+        _: wl_compositor::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 impl Dispatch<wl_shm::WlShm, ()> for WaylandState {
-    fn event(_: &mut Self, _: &wl_shm::WlShm, _: wl_shm::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &wl_shm::WlShm,
+        _: wl_shm::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 impl Dispatch<wl_shm_pool::WlShmPool, ()> for WaylandState {
-    fn event(_: &mut Self, _: &wl_shm_pool::WlShmPool, _: wl_shm_pool::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &wl_shm_pool::WlShmPool,
+        _: wl_shm_pool::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 impl Dispatch<wl_buffer::WlBuffer, ()> for WaylandState {
-    fn event(_: &mut Self, _: &wl_buffer::WlBuffer, _: wl_buffer::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &wl_buffer::WlBuffer,
+        _: wl_buffer::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 impl Dispatch<wl_region::WlRegion, ()> for WaylandState {
-    fn event(_: &mut Self, _: &wl_region::WlRegion, _: wl_region::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &wl_region::WlRegion,
+        _: wl_region::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 impl Dispatch<wl_surface::WlSurface, ()> for WaylandState {
     fn event(
@@ -646,38 +715,63 @@ impl Dispatch<wl_surface::WlSurface, ()> for WaylandState {
     }
 }
 impl Dispatch<zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1, ()> for WaylandState {
-    fn event(_: &mut Self, _: &zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1, _: zwlr_virtual_pointer_manager_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1,
+        _: zwlr_virtual_pointer_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 impl Dispatch<zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1, ()> for WaylandState {
-    fn event(_: &mut Self, _: &zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1, _: zwlr_virtual_pointer_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    fn event(
+        _: &mut Self,
+        _: &zwlr_virtual_pointer_v1::ZwlrVirtualPointerV1,
+        _: zwlr_virtual_pointer_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
 }
 
 pub fn connect() -> Result<(WaylandState, EventQueue<WaylandState>)> {
     let conn = Connection::connect_to_env().context("cannot connect to Wayland display")?;
-    let (globals, mut queue) = registry_queue_init::<WaylandState>(&conn)
-        .context("failed to initialise registry")?;
+    let (globals, mut queue) =
+        registry_queue_init::<WaylandState>(&conn).context("failed to initialise registry")?;
     let mut state = WaylandState::new();
     let qh = queue.handle();
 
     // log::debug!("compositor registry: {:?}", globals.contents().clone_list());
 
-    state.compositor = globals.bind::<wl_compositor::WlCompositor, _, _>(&qh, 1..=6, ()).ok();
+    state.compositor = globals
+        .bind::<wl_compositor::WlCompositor, _, _>(&qh, 1..=6, ())
+        .ok();
     state.shm = globals.bind::<wl_shm::WlShm, _, _>(&qh, 1..=1, ()).ok();
     state.seat = globals.bind::<wl_seat::WlSeat, _, _>(&qh, 1..=9, ()).ok();
-    state.layer_shell = globals.bind::<zwlr_layer_shell_v1::ZwlrLayerShellV1, _, _>(&qh, 1..=5, ()).ok();
+    state.layer_shell = globals
+        .bind::<zwlr_layer_shell_v1::ZwlrLayerShellV1, _, _>(&qh, 1..=5, ())
+        .ok();
     #[cfg(feature = "opencv")]
     {
-        state.screencopy_mgr = globals.bind::<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1, _, _>(&qh, 1..=3, ()).ok();
+        state.screencopy_mgr = globals
+            .bind::<zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1, _, _>(&qh, 1..=3, ())
+            .ok();
     }
-    state.vptr_mgr = globals.bind::<zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1, _, _>(&qh, 1..=2, ()).ok();
-    state.xdg_output_mgr = globals.bind::<zxdg_output_manager_v1::ZxdgOutputManagerV1, _, _>(&qh, 1..=3, ()).ok();
+    state.vptr_mgr = globals
+        .bind::<zwlr_virtual_pointer_manager_v1::ZwlrVirtualPointerManagerV1, _, _>(&qh, 1..=2, ())
+        .ok();
+    state.xdg_output_mgr = globals
+        .bind::<zxdg_output_manager_v1::ZxdgOutputManagerV1, _, _>(&qh, 1..=3, ())
+        .ok();
 
     let global_list = globals.contents().clone_list();
     for g in &global_list {
         if g.interface == "wl_output" {
-            let output: wl_output::WlOutput = globals
-                .registry()
-                .bind(g.name, g.version.min(4), &qh, ());
+            let output: wl_output::WlOutput =
+                globals.registry().bind(g.name, g.version.min(4), &qh, ());
             state.pending_outputs.push(PendingOutput {
                 wl_output: Some(output),
                 ..Default::default()
@@ -685,10 +779,18 @@ pub fn connect() -> Result<(WaylandState, EventQueue<WaylandState>)> {
         }
     }
 
-    if state.compositor.is_none() { bail!("wl_compositor not available"); }
-    if state.shm.is_none() { bail!("wl_shm not available"); }
-    if state.layer_shell.is_none() { bail!("zwlr_layer_shell_v1 not available – is this a wlroots compositor?"); }
-    if state.vptr_mgr.is_none() { bail!("zwlr_virtual_pointer_manager_v1 not available"); }
+    if state.compositor.is_none() {
+        bail!("wl_compositor not available");
+    }
+    if state.shm.is_none() {
+        bail!("wl_shm not available");
+    }
+    if state.layer_shell.is_none() {
+        bail!("zwlr_layer_shell_v1 not available – is this a wlroots compositor?");
+    }
+    if state.vptr_mgr.is_none() {
+        bail!("zwlr_virtual_pointer_manager_v1 not available");
+    }
 
     queue.roundtrip(&mut state)?;
 
@@ -710,7 +812,11 @@ pub fn connect() -> Result<(WaylandState, EventQueue<WaylandState>)> {
         .iter()
         .filter(|p| p.done || p.width > 0)
         .map(|p| Monitor {
-            name: if p.name.is_empty() { "unknown".into() } else { p.name.clone() },
+            name: if p.name.is_empty() {
+                "unknown".into()
+            } else {
+                p.name.clone()
+            },
             x: p.x,
             y: p.y,
             width: p.width,
@@ -778,7 +884,9 @@ fn create_shm_buffer_with_layout(
     let name = format!("warpd-rs-{}", std::process::id());
     let fd = rustix::shm::shm_open(
         &*name,
-        rustix::shm::ShmOFlags::CREATE | rustix::shm::ShmOFlags::EXCL | rustix::shm::ShmOFlags::RDWR,
+        rustix::shm::ShmOFlags::CREATE
+            | rustix::shm::ShmOFlags::EXCL
+            | rustix::shm::ShmOFlags::RDWR,
         rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR,
     )?;
     rustix::shm::shm_unlink(&*name)?;
@@ -787,15 +895,7 @@ fn create_shm_buffer_with_layout(
     let data = unsafe { memmap2::MmapOptions::new().len(size).map_mut(&fd)? };
 
     let pool = shm.create_pool(fd.as_fd(), size as i32, qh, ());
-    let buffer = pool.create_buffer(
-        0,
-        width,
-        height,
-        stride,
-        format,
-        qh,
-        (),
-    );
+    let buffer = pool.create_buffer(0, width, height, stride, format, qh, ());
 
     Ok(ShmBuffer {
         width,
@@ -853,14 +953,8 @@ pub fn capture_output_frame(
 
     let shm = state.shm.as_ref().context("wl_shm is unavailable")?;
     let qh = queue.handle();
-    let shm_buf = create_shm_buffer_with_layout(
-        shm,
-        &qh,
-        info.width,
-        info.height,
-        info.stride,
-        info.format,
-    )?;
+    let shm_buf =
+        create_shm_buffer_with_layout(shm, &qh, info.width, info.height, info.stride, info.format)?;
 
     frame.copy(&shm_buf.buffer);
     queue.flush()?;
@@ -929,9 +1023,7 @@ pub fn find_focused_monitor(
             | zwlr_layer_surface_v1::Anchor::Right,
     );
     layer_surface.set_exclusive_zone(-1);
-    layer_surface.set_keyboard_interactivity(
-        zwlr_layer_surface_v1::KeyboardInteractivity::None,
-    );
+    layer_surface.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
 
     // Set an empty input region so the probe doesn't steal pointer events.
     let region = state.compositor.as_ref().unwrap().create_region(&qh, ());
@@ -974,9 +1066,7 @@ pub fn find_focused_monitor(
     let focused_idx = state
         .surface_entered_output
         .as_ref()
-        .and_then(|entered| {
-            state.monitors.iter().position(|m| m.wl_output == *entered)
-        });
+        .and_then(|entered| state.monitors.iter().position(|m| m.wl_output == *entered));
 
     // Tear down the probe surface.
     state.surface_entered_output = None;
@@ -1023,9 +1113,8 @@ pub fn create_overlay(
             | zwlr_layer_surface_v1::Anchor::Right,
     );
     layer_surface.set_exclusive_zone(-1);
-    layer_surface.set_keyboard_interactivity(
-        zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive,
-    );
+    layer_surface
+        .set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive);
     layer_surface.set_size(monitor.width as u32, monitor.height as u32);
     surface.commit();
 
@@ -1035,7 +1124,11 @@ pub fn create_overlay(
     while !state.layer_surface_configured {
         queue.blocking_dispatch(state)?;
     }
-    log::info!("overlay configured, creating shm buffer {}x{}", monitor.width, monitor.height);
+    log::info!(
+        "overlay configured, creating shm buffer {}x{}",
+        monitor.width,
+        monitor.height
+    );
 
     let shm = state.shm.as_ref().unwrap();
     let qh = queue.handle();

@@ -1,7 +1,6 @@
 ///! Hint mode: generates a grid of labelled hint boxes across the screen,
 ///! draws them using Cairo onto the overlay's shared-memory buffer, and
 ///! progressively filters them as the user types characters.
-
 use crate::config::{self, Config};
 use crate::wayland::{KeyEvent, KeyState, Monitor, Overlay};
 
@@ -150,10 +149,7 @@ pub fn read_target_areas_from_stdin() -> Result<Vec<TargetArea>> {
 }
 
 /// Convert global areas into monitor-local, clipped areas.
-pub fn normalize_areas_for_monitor(
-    monitor: &Monitor,
-    areas: &[TargetArea],
-) -> Vec<TargetArea> {
+pub fn normalize_areas_for_monitor(monitor: &Monitor, areas: &[TargetArea]) -> Vec<TargetArea> {
     let mut out = Vec::new();
     let mon_l = monitor.x;
     let mon_t = monitor.y;
@@ -273,10 +269,34 @@ pub fn draw_hints(
 
         // --- Rounded rectangle background ---
         cr.new_sub_path();
-        cr.arc(x + w - radius, y + radius, radius, -std::f64::consts::FRAC_PI_2, 0.0);
-        cr.arc(x + w - radius, y + h - radius, radius, 0.0, std::f64::consts::FRAC_PI_2);
-        cr.arc(x + radius, y + h - radius, radius, std::f64::consts::FRAC_PI_2, std::f64::consts::PI);
-        cr.arc(x + radius, y + radius, radius, std::f64::consts::PI, 3.0 * std::f64::consts::FRAC_PI_2);
+        cr.arc(
+            x + w - radius,
+            y + radius,
+            radius,
+            -std::f64::consts::FRAC_PI_2,
+            0.0,
+        );
+        cr.arc(
+            x + w - radius,
+            y + h - radius,
+            radius,
+            0.0,
+            std::f64::consts::FRAC_PI_2,
+        );
+        cr.arc(
+            x + radius,
+            y + h - radius,
+            radius,
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::PI,
+        );
+        cr.arc(
+            x + radius,
+            y + radius,
+            radius,
+            std::f64::consts::PI,
+            3.0 * std::f64::consts::FRAC_PI_2,
+        );
         cr.close_path();
         cr.set_source_rgba(bg_r, bg_g, bg_b, bg_alpha);
         cr.fill()?;
@@ -314,9 +334,7 @@ pub fn draw_hints(
     overlay
         .surface
         .attach(Some(&overlay.shm_buffer.buffer), 0, 0);
-    overlay
-        .surface
-        .damage_buffer(0, 0, width, height);
+    overlay.surface.damage_buffer(0, 0, width, height);
     overlay.surface.commit();
 
     Ok(())
@@ -339,11 +357,7 @@ fn keysym_to_char(sym: u32) -> Option<char> {
 }
 
 /// Process a key event during hint mode. Returns what the mode loop should do.
-pub fn process_key(
-    event: &KeyEvent,
-    hints: &[Hint],
-    typed: &mut String,
-) -> HintResult {
+pub fn process_key(event: &KeyEvent, hints: &[Hint], typed: &mut String) -> HintResult {
     if event.state != KeyState::Pressed {
         return HintResult::Continue;
     }
@@ -412,15 +426,22 @@ impl GridSelection {
         }
     }
 
-    /// Subdivide into quadrant: u=top-left, i=top-right, j=bottom-left, k=bottom-right
-    pub fn subdivide(&mut self, quadrant: char) {
+    /// Subdivide into quadrant index: 0=TL, 1=TR, 2=BL, 3=BR
+    pub fn subdivide(&mut self, quadrant: usize) {
         let hw = self.w / 2.0;
         let hh = self.h / 2.0;
         match quadrant {
-            'u' => { /* top-left, x/y stay */ }
-            'i' => { self.x += hw; }
-            'j' => { self.y += hh; }
-            'k' => { self.x += hw; self.y += hh; }
+            0 => { /* top-left, x/y stay */ }
+            1 => {
+                self.x += hw;
+            }
+            2 => {
+                self.y += hh;
+            }
+            3 => {
+                self.x += hw;
+                self.y += hh;
+            }
             _ => return,
         }
         self.w = hw;
@@ -433,11 +454,7 @@ impl GridSelection {
 }
 
 /// Draw the grid overlay: a crosshair dividing the current selection.
-pub fn draw_grid(
-    overlay: &mut Overlay,
-    sel: &GridSelection,
-    config: &Config,
-) -> Result<()> {
+pub fn draw_grid(overlay: &mut Overlay, sel: &GridSelection, config: &Config) -> Result<()> {
     let width = overlay.shm_buffer.width;
     let height = overlay.shm_buffer.height;
     let stride = overlay.shm_buffer.stride;
@@ -489,25 +506,34 @@ pub fn draw_grid(
     cr.stroke()?;
 
     // Labels in each quadrant
-    cr.select_font_face("monospace", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
+    cr.select_font_face(
+        "monospace",
+        cairo::FontSlant::Normal,
+        cairo::FontWeight::Bold,
+    );
     cr.set_font_size(config.grid_font_size);
     cr.set_source_rgba(gr, gg, gb, 0.6);
 
-    let labels = [('u', sel.x + sel.w * 0.25, sel.y + sel.h * 0.25),
-                  ('i', sel.x + sel.w * 0.75, sel.y + sel.h * 0.25),
-                  ('j', sel.x + sel.w * 0.25, sel.y + sel.h * 0.75),
-                  ('k', sel.x + sel.w * 0.75, sel.y + sel.h * 0.75)];
-    for (ch, lx, ly) in labels {
-        let s = ch.to_string();
-        let ext = cr.text_extents(&s)?;
+    let label_positions = [
+        (sel.x + sel.w * 0.25, sel.y + sel.h * 0.25),
+        (sel.x + sel.w * 0.75, sel.y + sel.h * 0.25),
+        (sel.x + sel.w * 0.25, sel.y + sel.h * 0.75),
+        (sel.x + sel.w * 0.75, sel.y + sel.h * 0.75),
+    ];
+    for (idx, (lx, ly)) in label_positions.iter().enumerate() {
+        let label = config.grid_quadrant_keys[idx].as_str();
+        let label = if label.is_empty() { "?" } else { label };
+        let ext = cr.text_extents(label)?;
         cr.move_to(lx - ext.width() / 2.0, ly + ext.height() / 2.0);
-        cr.show_text(&s)?;
+        cr.show_text(label)?;
     }
 
     drop(cr);
     surface.flush();
 
-    overlay.surface.attach(Some(&overlay.shm_buffer.buffer), 0, 0);
+    overlay
+        .surface
+        .attach(Some(&overlay.shm_buffer.buffer), 0, 0);
     overlay.surface.damage_buffer(0, 0, width, height);
     overlay.surface.commit();
 

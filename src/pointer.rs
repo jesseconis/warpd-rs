@@ -8,7 +8,9 @@ pub fn surface_pointer_pos(
     surface: &wl_surface::WlSurface,
 ) -> Option<(f64, f64, PointerPosSource)> {
     if state.pointer_focus_surface.as_ref() == Some(surface) {
-        if let (Some((x, y)), Some(source)) = (state.pointer_surface_pos, state.pointer_surface_pos_source) {
+        if let (Some((x, y)), Some(source)) =
+            (state.pointer_surface_pos, state.pointer_surface_pos_source)
+        {
             return Some((x, y, source));
         }
     }
@@ -22,17 +24,23 @@ pub fn surface_pointer_pos(
 ///   position = (x / x_extent, y / y_extent)  →  normalised 0,1 range
 /// So we pass pixel coordinates relative to the bounding-box origin,
 /// with the bounding-box dimensions as extents.
-pub fn warp_pointer(
-    state: &WaylandState,
-    x: f64,
-    y: f64,
-) {
+pub fn warp_pointer(state: &WaylandState, x: f64, y: f64) {
     if let Some(ref vptr) = state.vptr {
         // Compute the bounding box of all monitors (may have negative offsets)
         let min_x = state.monitors.iter().map(|m| m.x).min().unwrap_or(0);
         let min_y = state.monitors.iter().map(|m| m.y).min().unwrap_or(0);
-        let max_x = state.monitors.iter().map(|m| m.x + m.width).max().unwrap_or(1);
-        let max_y = state.monitors.iter().map(|m| m.y + m.height).max().unwrap_or(1);
+        let max_x = state
+            .monitors
+            .iter()
+            .map(|m| m.x + m.width)
+            .max()
+            .unwrap_or(1);
+        let max_y = state
+            .monitors
+            .iter()
+            .map(|m| m.y + m.height)
+            .max()
+            .unwrap_or(1);
 
         let extent_w = (max_x - min_x) as u32;
         let extent_h = (max_y - min_y) as u32;
@@ -57,7 +65,6 @@ pub fn warp_pointer(
     }
 }
 
-
 /// Simulate a mouse button click (press + release).
 /// button: 1=left, 2=middle, 3=right  (mapped to Linux BTN_LEFT etc.)
 pub fn click_button(state: &WaylandState, button: u32) {
@@ -81,8 +88,6 @@ pub fn click_button(state: &WaylandState, button: u32) {
     }
 }
 
-
-
 pub fn resolve_initial_pointer_position(
     raw_x: f64,
     raw_y: f64,
@@ -98,19 +103,19 @@ pub fn resolve_initial_pointer_position(
         return None;
     }
 
-    let in_bounds = |x: f64, y: f64| {
-        (0.0..=max_x).contains(&x) && (0.0..=max_y).contains(&y)
-    };
+    let in_bounds = |x: f64, y: f64| (0.0..=max_x).contains(&x) && (0.0..=max_y).contains(&y);
 
     let mut candidates = vec![("surface-local", raw_x, raw_y)];
     if allow_global_map {
         candidates.push(("global-logical", raw_x - monitor_x, raw_y - monitor_y));
     }
-    candidates.push(("offset-adjusted-enter", raw_x + monitor_x, raw_y + monitor_y));
+    candidates.push((
+        "offset-adjusted-enter",
+        raw_x + monitor_x,
+        raw_y + monitor_y,
+    ));
 
-    candidates
-        .into_iter()
-        .find(|(_, x, y)| in_bounds(*x, *y))
+    candidates.into_iter().find(|(_, x, y)| in_bounds(*x, *y))
 }
 
 #[cfg(test)]
@@ -120,7 +125,15 @@ mod tests {
     #[test]
     fn resolves_surface_local_pointer_coords() {
         assert_eq!(
-            resolve_initial_pointer_position(831.11328125, 558.5, 1920.0, -1080.0, 2560.0, 1080.0, true),
+            resolve_initial_pointer_position(
+                831.11328125,
+                558.5,
+                1920.0,
+                -1080.0,
+                2560.0,
+                1080.0,
+                true
+            ),
             Some(("surface-local", 831.11328125, 558.5))
         );
     }
@@ -136,7 +149,9 @@ mod tests {
     #[test]
     fn resolves_hyprland_enter_pointer_coords() {
         assert_eq!(
-            resolve_initial_pointer_position(-1088.0, 1638.5, 1920.0, -1080.0, 2560.0, 1080.0, false),
+            resolve_initial_pointer_position(
+                -1088.0, 1638.5, 1920.0, -1080.0, 2560.0, 1080.0, false
+            ),
             Some(("offset-adjusted-enter", 832.0, 558.5))
         );
     }

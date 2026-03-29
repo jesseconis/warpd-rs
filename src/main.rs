@@ -28,8 +28,8 @@ use std::time::{Duration, Instant};
 use wayland::KeyState;
 use wayland_client::protocol::wl_output::Transform;
 
-// see pump_wayland_nonblocking , seems necessary but not entirely sure why 
-// it fixed laggy/unresponsive behavior of pointer in normal mode 
+// see pump_wayland_nonblocking , seems necessary but not entirely sure why
+// it fixed laggy/unresponsive behavior of pointer in normal mode
 use rustix::event::{self, PollFd};
 use rustix::io::Errno;
 
@@ -358,7 +358,7 @@ fn run_normal_mode(
     let target_frame = Duration::from_micros(8_333); // ~120fps
     let mut held_keys: HashMap<u32, HeldKeyRole> = HashMap::new();
 
-    // very unsure about what this is doing (🤖) but it works 🤷... 
+    // very unsure about what this is doing (🤖) but it works 🤷...
     let pump_wayland_nonblocking =
         |state: &mut wayland::WaylandState,
          queue: &mut wayland_client::EventQueue<wayland::WaylandState>|
@@ -724,12 +724,16 @@ fn run_normal_mode(
             frame_speed *= speed_modifier_multiplier;
         }
 
-        let moving_left = held_keys.values().any(|role| *role == HeldKeyRole::MoveLeft);
+        let moving_left = held_keys
+            .values()
+            .any(|role| *role == HeldKeyRole::MoveLeft);
         let moving_right = held_keys
             .values()
             .any(|role| *role == HeldKeyRole::MoveRight);
         let moving_up = held_keys.values().any(|role| *role == HeldKeyRole::MoveUp);
-        let moving_down = held_keys.values().any(|role| *role == HeldKeyRole::MoveDown);
+        let moving_down = held_keys
+            .values()
+            .any(|role| *role == HeldKeyRole::MoveDown);
 
         if moving_left {
             cx = (cx - frame_speed).max(0.0);
@@ -800,10 +804,9 @@ fn main() -> Result<()> {
         run_grid_mode(&mut state, &mut queue, &cfg)?;
     } else if cli.normal {
         run_normal_mode(&mut state, &mut queue, &cfg)?;
-    }
-    else if cli.generate_config {
+    } else if cli.generate_config {
         let pwd = std::env::current_dir()?;
-        let path =  pwd.join("config.toml");
+        let path = pwd.join("config.toml");
         config::Config::create_config(&path)?;
         log::info!("Default config written to {}", pwd.display());
     }
