@@ -17,6 +17,7 @@ pub struct Config {
     pub hint_bg_opacity: f64,
     /// Foreground / text colour of hint boxes.
     pub hint_fgcolor: String,
+
     /// Border radius in pixels for hint rounded-rect.
     pub hint_border_radius: f64,
     /// Font family used to render hint labels.
@@ -53,6 +54,8 @@ pub struct Config {
 
     // -- Mouse buttons (warpd convention: left, middle, right) --
     pub buttons: [String; 3],
+    /// If true, hint/grid auto-warp also emits an implicit left click.
+    pub click_after_warp: bool,
 }
 
 impl Default for Config {
@@ -81,6 +84,7 @@ impl Default for Config {
             speed_modifier_multiplier: 5.0,
 
             buttons: ["m".into(), ",".into(), ".".into()],
+            click_after_warp: true,
 
             crosshair_line_width: 2,
             cursor_color: "#f38ba8".into(),
