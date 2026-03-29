@@ -31,19 +31,20 @@ Hint targets are selected by `hint_source`:
    <img src="docs/grid.gif" height="450px"/>
 
 1. The screen is divided into four quadrants with a crosshair
-2. Press **u** (top-left), **i** (top-right), **j** (bottom-left), **k** (bottom-right) to subdivide
+2. Press the configured grid keys (`grid_quadrant_keys`, default **u / i / j / k** for TL/TR/BL/BR) to subdivide
 3. Repeat until precise — the cursor warps when the cell is small enough
-4. Press **m** to left-click at the current centre, **Escape** to cancel
+4. Press the configured left-click key (`buttons[0]`, default **m**) at the current centre, **Escape** to cancel
 
 ### Normal (`--normal`)
 
    <img src="docs/normal.gif" height="450px"/>
 
 1. A crosshair with a cursor dot appears at last known pointer position (or center of focused output if acquisition fails) 
-2. Hold **h/j/k/l** for continuous movement
-3. Press **m** for left-click, **,** for middle-click, **.** for right-click
-4. Press **x** to switch to hint mode, **g** to switch to grid mode
-5. Press **Escape** to cancel
+2. Hold the configured movement keys (`normal_move_keys`, default **h/j/k/l**) for continuous movement (left/down/up/right order)
+3. Press the configured mouse keys (`buttons`, default **m**, **,**, **.** for L/M/R)
+4. Hold the speed modifier (`speed_modifier_key`, default **Shift**) to multiply the cursor speed by `speed_modifier_multiplier`
+5. Press **x** to switch to hint mode, **g** to switch to grid mode
+6. Press **Escape** to cancel
 
 ## Configuration
 
