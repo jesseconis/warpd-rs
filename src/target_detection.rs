@@ -346,6 +346,26 @@ fn maybe_dump_debug(
     log::debug!("target detection debug dump written to {}", dir.display());
 }
 
+fn bounding_rect_from_points(points: &Vector<Point>) -> Result<Rect> {
+    if points.is_empty() {
+        return Ok(Rect::new(0, 0, 0, 0));
+    }
+
+    let first = points.get(0)?;
+    let (mut min_x, mut max_x) = (first.x, first.x);
+    let (mut min_y, mut max_y) = (first.y, first.y);
+
+    for i in 1..points.len() {
+        let point = points.get(i)?;
+        min_x = min_x.min(point.x);
+        max_x = max_x.max(point.x);
+        min_y = min_y.min(point.y);
+        max_y = max_y.max(point.y);
+    }
+
+    Ok(Rect::new(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1))
+}
+
 pub fn detect_target_areas(frame: &CapturedFrame, monitor: &Monitor) -> Result<Vec<TargetArea>> {
     let gray = grayscale_from_frame(frame)?;
     let transformed = apply_transform(gray.clone(), monitor.transform)?;
@@ -389,7 +409,7 @@ pub fn detect_target_areas(frame: &CapturedFrame, monitor: &Monitor) -> Result<V
     let mut raw_rects = Vec::with_capacity(contours.len());
     for i in 0..contours.len() {
         let c = contours.get(i)?;
-        raw_rects.push(imgproc::bounding_rect(&c)?);
+        raw_rects.push(bounding_rect_from_points(&c)?);
     }
 
     let hierarchy_vec = hierarchy.data_typed::<Vec4i>()?.to_vec();
