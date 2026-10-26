@@ -146,7 +146,6 @@ mod tests {
         );
     }
 
-
     #[test]
     fn resolves_hyprland_enter_pointer_coords() {
         assert_eq!(
