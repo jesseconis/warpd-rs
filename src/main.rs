@@ -12,6 +12,8 @@
 ///   bind = SUPER ALT, g, exec, warpd-rs --grid
 ///   bind = SUPER ALT, c, exec, warpd-rs --normal
 mod config;
+#[cfg(feature = "gui")]
+mod gui;
 mod hint;
 mod input;
 mod pointer;
@@ -20,7 +22,7 @@ mod target_detection;
 mod wayland;
 
 use anyhow::Result;
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use pointer::{click_button, resolve_initial_pointer_position, surface_pointer_pos, warp_pointer};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -44,6 +46,9 @@ use rustix::io::Errno;
     disable_version_flag = true
 )]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+
     /// Print version and compiled runtime features.
     #[arg(short = 'V', long = "version")]
     version: bool,
@@ -61,13 +66,20 @@ struct Cli {
     normal: bool,
 
     /// Path to config TOML file. If set, default config search locations are skipped.
-    #[arg(long)]
+    #[arg(long, global = true)]
     config: Option<PathBuf>,
 
     /// Generate a default config file at the specified path, then exit.
     /// If the file already exists, it will be overwritten.
     #[arg(long)]
     generate_config: bool,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    #[cfg(feature = "gui")]
+    /// Launch the configuration editor GUI.
+    Config,
 }
 
 // ---------------------------------------------------------------------------
@@ -798,6 +810,16 @@ fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
         .format_timestamp(None)
         .init();
+
+    if let Some(command) = cli.command {
+        match command {
+            #[cfg(feature = "gui")]
+            Command::Config => {
+                let loaded = config::Config::load_with_source(cli.config.as_deref());
+                return gui::run_config_editor(loaded);
+            }
+        }
+    }
 
     let cfg = config::Config::load(cli.config.as_deref());
     let (mut state, mut queue) = wayland::connect()?;

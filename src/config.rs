@@ -3,7 +3,7 @@ use std::path::Path;
 use std::path::PathBuf;
 
 /// All configurable options for warpd-rs, matching the original warpd config keys.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
     // -- Hint mode visuals --
@@ -58,6 +58,22 @@ pub struct Config {
     pub click_after_warp: bool,
 }
 
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigSource {
+    Disk,
+    Defaults,
+}
+
+#[cfg_attr(not(feature = "gui"), allow(dead_code))]
+#[derive(Debug, Clone)]
+pub struct LoadedConfig {
+    pub config: Config,
+    pub path: PathBuf,
+    pub source: ConfigSource,
+    pub load_error: Option<String>,
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -94,102 +110,205 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Load configuration, falling back to defaults for any missing keys.
-    /// If `path` is provided, only that file is considered.
-    /// Otherwise search order is: $XDG_CONFIG_HOME/warpd-rs/config.toml  →  ~/.config/warpd-rs/config.toml
-    pub fn load(path: Option<&Path>) -> Self {
+    pub fn candidate_paths() -> Vec<PathBuf> {
+        let mut candidates = Vec::new();
+        if let Some(xdg) = dirs::config_dir() {
+            candidates.push(xdg.join("warpd-rs").join("config.toml"));
+        }
+
+        if let Some(home) = dirs::home_dir() {
+            let home_cfg = home.join(".config/warpd-rs/config.toml");
+            if !candidates.contains(&home_cfg) {
+                candidates.push(home_cfg);
+            }
+        }
+
+        candidates
+    }
+
+    pub fn preferred_path() -> PathBuf {
+        Self::candidate_paths()
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| PathBuf::from("config.toml"))
+    }
+
+    pub fn load_with_source(path: Option<&Path>) -> LoadedConfig {
         if let Some(path) = path {
             match std::fs::read_to_string(path) {
                 Ok(text) => match toml::from_str::<Config>(&text) {
                     Ok(cfg) => {
                         log::info!("loaded config from {}", path.display());
                         log::debug!("{:#?}", cfg);
-                        return cfg;
+                        return LoadedConfig {
+                            config: cfg,
+                            path: path.to_path_buf(),
+                            source: ConfigSource::Disk,
+                            load_error: None,
+                        };
                     }
-                    Err(e) => {
-                        log::warn!("bad config at {}: {e}", path.display());
+                    Err(error) => {
+                        let message = format!("bad config at {}: {error}", path.display());
+                        log::warn!("{message}");
+                        log::info!("using defaults after explicit config load failure");
+                        let config = Config::default();
+                        log::debug!("{:#?}", config);
+                        return LoadedConfig {
+                            config,
+                            path: path.to_path_buf(),
+                            source: ConfigSource::Defaults,
+                            load_error: Some(message),
+                        };
                     }
                 },
-                Err(e) => {
-                    log::warn!("cannot read {}: {e}", path.display());
+                Err(error) => {
+                    let message = format!("cannot read {}: {error}", path.display());
+                    log::warn!("{message}");
+                    log::info!("using defaults after explicit config load failure");
+                    let config = Config::default();
+                    log::debug!("{:#?}", config);
+                    return LoadedConfig {
+                        config,
+                        path: path.to_path_buf(),
+                        source: ConfigSource::Defaults,
+                        load_error: Some(message),
+                    };
                 }
             }
-
-            log::info!("using defaults after explicit config load failure");
-            log::debug!("{:#?}", Self::default());
-            return Config::default();
         }
 
-        let candidates: Vec<PathBuf> = {
-            let mut v = Vec::new();
-            if let Some(xdg) = dirs::config_dir() {
-                v.push(xdg.join("warpd-rs").join("config.toml"));
-            }
-            let home_cfg = dirs::home_dir().map(|h| h.join(".config/warpd-rs/config.toml"));
-            if let Some(p) = home_cfg {
-                if !v.contains(&p) {
-                    v.push(p);
-                }
-            }
-            v
-        };
+        let candidates = Self::candidate_paths();
+        let mut first_error: Option<(PathBuf, String)> = None;
 
-        for path in &candidates {
-            if path.exists() {
-                match std::fs::read_to_string(path) {
-                    Ok(text) => match toml::from_str::<Config>(&text) {
-                        Ok(cfg) => {
-                            log::info!("loaded config from {}", path.display());
-                            log::debug!("{:#?}", cfg);
-                            return cfg;
+        for candidate in &candidates {
+            if !candidate.exists() {
+                continue;
+            }
+
+            match std::fs::read_to_string(candidate) {
+                Ok(text) => match toml::from_str::<Config>(&text) {
+                    Ok(cfg) => {
+                        log::info!("loaded config from {}", candidate.display());
+                        log::debug!("{:#?}", cfg);
+                        return LoadedConfig {
+                            config: cfg,
+                            path: candidate.clone(),
+                            source: ConfigSource::Disk,
+                            load_error: None,
+                        };
+                    }
+                    Err(error) => {
+                        let message = format!("bad config at {}: {error}", candidate.display());
+                        log::warn!("{message}");
+                        if first_error.is_none() {
+                            first_error = Some((candidate.clone(), message));
                         }
-                        Err(e) => {
-                            log::warn!("bad config at {}: {e}", path.display());
-                        }
-                    },
-                    Err(e) => {
-                        log::warn!("cannot read {}: {e}", path.display());
+                    }
+                },
+                Err(error) => {
+                    let message = format!("cannot read {}: {error}", candidate.display());
+                    log::warn!("{message}");
+                    if first_error.is_none() {
+                        first_error = Some((candidate.clone(), message));
                     }
                 }
             }
         }
 
-        log::info!("no config file found, using defaults");
-        log::debug!("{:#?}", Self::default());
-        Config::default()
+        let config = Config::default();
+        match first_error {
+            Some((path, message)) => {
+                log::info!("using defaults after config load failure");
+                log::debug!("{:#?}", config);
+                LoadedConfig {
+                    config,
+                    path,
+                    source: ConfigSource::Defaults,
+                    load_error: Some(message),
+                }
+            }
+            None => {
+                log::info!("no config file found, using defaults");
+                log::debug!("{:#?}", config);
+                LoadedConfig {
+                    config,
+                    path: Self::preferred_path(),
+                    source: ConfigSource::Defaults,
+                    load_error: None,
+                }
+            }
+        }
     }
 
-    pub fn create_config(path: &Path) -> std::io::Result<()> {
+    /// Load configuration, falling back to defaults for any missing keys.
+    /// If `path` is provided, only that file is considered.
+    /// Otherwise search order is: $XDG_CONFIG_HOME/warpd-rs/config.toml  →  ~/.config/warpd-rs/config.toml
+    pub fn load(path: Option<&Path>) -> Self {
+        Self::load_with_source(path).config
+    }
+
+    pub fn to_pretty_toml(&self) -> Result<String, toml::ser::Error> {
+        toml::to_string_pretty(self)
+    }
+
+    pub fn save_to_path(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let default_cfg = Config::default();
-        let toml_str =
-            toml::to_string_pretty(&default_cfg).expect("failed to serialize default config");
-        std::fs::write(path, toml_str)?;
-        Ok(())
+
+        let toml = self
+            .to_pretty_toml()
+            .expect("failed to serialize config to TOML");
+        std::fs::write(path, toml)
+    }
+
+    pub fn create_config(path: &Path) -> std::io::Result<()> {
+        Config::default().save_to_path(path)
+    }
+}
+
+#[cfg(feature = "gui")]
+pub fn is_valid_hex_color(hex: &str) -> bool {
+    let hex = hex.strip_prefix('#').unwrap_or(hex);
+    matches!(hex.len(), 6 | 8) && hex.chars().all(|ch| ch.is_ascii_hexdigit())
+}
+
+pub fn color32_from_hex(hex: &str) -> Option<[u8; 4]> {
+    let hex = hex.strip_prefix('#').unwrap_or(hex);
+    let (r, g, b, a) = match hex.len() {
+        6 => (
+            u8::from_str_radix(&hex[0..2], 16).ok()?,
+            u8::from_str_radix(&hex[2..4], 16).ok()?,
+            u8::from_str_radix(&hex[4..6], 16).ok()?,
+            255,
+        ),
+        8 => (
+            u8::from_str_radix(&hex[0..2], 16).ok()?,
+            u8::from_str_radix(&hex[2..4], 16).ok()?,
+            u8::from_str_radix(&hex[4..6], 16).ok()?,
+            u8::from_str_radix(&hex[6..8], 16).ok()?,
+        ),
+        _ => return None,
+    };
+
+    Some([r, g, b, a])
+}
+
+#[cfg(feature = "gui")]
+pub fn hex_from_rgba8(rgba: [u8; 4]) -> String {
+    if rgba[3] == 255 {
+        format!("#{:02x}{:02x}{:02x}", rgba[0], rgba[1], rgba[2])
+    } else {
+        format!(
+            "#{:02x}{:02x}{:02x}{:02x}",
+            rgba[0], rgba[1], rgba[2], rgba[3]
+        )
     }
 }
 
 /// Parse a CSS hex colour string (#RRGGBB or #RRGGBBAA) into (r, g, b, a) with each in 0.0..1.0.
 pub fn parse_hex_color(hex: &str) -> (f64, f64, f64, f64) {
-    let hex = hex.trim_start_matches('#');
-    let (r, g, b, a) = match hex.len() {
-        6 => {
-            let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
-            let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
-            let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
-            (r, g, b, 255u8)
-        }
-        8 => {
-            let r = u8::from_str_radix(&hex[0..2], 16).unwrap_or(0);
-            let g = u8::from_str_radix(&hex[2..4], 16).unwrap_or(0);
-            let b = u8::from_str_radix(&hex[4..6], 16).unwrap_or(0);
-            let a = u8::from_str_radix(&hex[6..8], 16).unwrap_or(255);
-            (r, g, b, a)
-        }
-        _ => (0, 0, 0, 255),
-    };
+    let (r, g, b, a) = color32_from_hex(hex).map_or((0, 0, 0, 255), |[r, g, b, a]| (r, g, b, a));
     (
         r as f64 / 255.0,
         g as f64 / 255.0,

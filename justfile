@@ -16,6 +16,21 @@ build-bins:
     @echo "Done:"
     @ls -lh dist/warpd-rs*v{{version}}
 
+build-gui-bins:
+    @echo "Building warpd-rs v{{version}} with config GUI..."
+    mkdir -p dist
+
+    # With opencv + gui
+    cargo build --release --features gui
+    cp target/release/warpd-rs dist/warpd-rs-gui-v{{version}}
+
+    # Without opencv, but with gui
+    cargo build --release --no-default-features --features gui
+    cp target/release/warpd-rs dist/warpd-rs-gui-nocv-v{{version}}
+
+    @echo "Done:"
+    @ls -lh dist/warpd-rs-gui*v{{version}}
+
 prepare-release level='patch':
     cargo-release release --execute {{level}} 
 

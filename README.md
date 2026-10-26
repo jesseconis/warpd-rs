@@ -51,6 +51,16 @@ Hint targets are selected by `hint_source`:
 
 Place a TOML file at `~/.config/warpd-rs/config.toml` [an example is included](./config.example.toml)
 
+When built with the `gui` feature, `warpd-rs` also exposes a configuration editor:
+
+```bash
+cargo run --features gui -- config
+```
+
+The editor resolves the same config path as the CLI. If `--config <PATH>` is supplied, that path is loaded directly; otherwise it searches the default config locations and falls back to defaults bound to the preferred config path when nothing exists on disk.
+
+Valid edits auto-save back to the active TOML file as canonical pretty TOML. The editor includes modal flows for opening another path, saving to a new path, and reloading from disk.
+
 #### Hyprland binds
 
 ```ini
@@ -66,10 +76,22 @@ bind = SUPER ALT, c, exec, warpd-rs --normal
 cargo build --release
 ```
 
+Build with the configuration GUI enabled:
+
+```bash
+cargo build --release --features gui
+```
+
 If you don't want detect mode, build without opencv dep. 
 
 ```bash
 cargo build --release --no-default-features
+```
+
+Build the GUI without detect mode:
+
+```bash
+cargo build --release --no-default-features --features gui
 ```
 
 ## Debug
