@@ -61,6 +61,9 @@ bind = SUPER ALT, c, exec, warpd-rs --normal
 
 ## Build
 
+Requires Rust 1.88 or newer. The default build also needs OpenCV 4.x or 5.x
+(including development headers) and libclang for binding generation. OpenCV 5's
+geometry module is enabled for contour bounding boxes.
 
 ```bash
 cargo build --release

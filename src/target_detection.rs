@@ -5,6 +5,14 @@ use opencv::core::{self, Mat, Point, Rect, Size, Vec4i, Vector};
 use opencv::imgcodecs;
 use opencv::imgproc;
 use opencv::prelude::*;
+
+// OpenCV 5 moved contour geometry out of imgproc; keep OpenCV 4 builds working.
+opencv::opencv_branch_5! {
+    use opencv::geometry::bounding_rect;
+}
+opencv::not_opencv_branch_5! {
+    use opencv::imgproc::bounding_rect;
+}
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,6 +24,23 @@ use wayland_client::protocol::wl_output;
 use wayland_client::protocol::wl_shm;
 
 static DEBUG_DUMP_DONE: AtomicBool = AtomicBool::new(false);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contour_bounding_rect_uses_the_available_opencv_module() -> Result<()> {
+        let contour = Vector::<Point>::from_iter([
+            Point::new(10, 20),
+            Point::new(30, 20),
+            Point::new(30, 40),
+            Point::new(10, 40),
+        ]);
+        assert_eq!(bounding_rect(&contour)?, Rect::new(10, 20, 21, 21));
+        Ok(())
+    }
+}
 
 fn grayscale_from_frame(frame: &CapturedFrame) -> Result<Mat> {
     let width = frame.width.max(0) as usize;
@@ -274,10 +299,10 @@ fn maybe_dump_debug(
     let rects_path = dir.join("05_rects_overlay.png");
     let stats_path = dir.join("stats.txt");
 
-    let _ = imgcodecs::imwrite(&gray_path.to_string_lossy(), gray, &params);
-    let _ = imgcodecs::imwrite(&transformed_path.to_string_lossy(), transformed, &params);
-    let _ = imgcodecs::imwrite(&edges_path.to_string_lossy(), edges, &params);
-    let _ = imgcodecs::imwrite(&dilated_path.to_string_lossy(), dilated, &params);
+    let _ = imgcodecs::imwrite(&gray_path, gray, &params);
+    let _ = imgcodecs::imwrite(&transformed_path, transformed, &params);
+    let _ = imgcodecs::imwrite(&edges_path, edges, &params);
+    let _ = imgcodecs::imwrite(&dilated_path, dilated, &params);
 
     let mut overlay = Mat::default();
     if imgproc::cvt_color(
@@ -297,7 +322,7 @@ fn maybe_dump_debug(
             };
             let _ = imgproc::rectangle(&mut overlay, *r, color, 1, imgproc::LINE_8, 0);
         }
-        let _ = imgcodecs::imwrite(&rects_path.to_string_lossy(), &overlay, &params);
+        let _ = imgcodecs::imwrite(&rects_path, &overlay, &params);
     }
 
     let primary_kept = filtered_primary.iter().filter(|f| !**f).count();
@@ -389,7 +414,7 @@ pub fn detect_target_areas(frame: &CapturedFrame, monitor: &Monitor) -> Result<V
     let mut raw_rects = Vec::with_capacity(contours.len());
     for i in 0..contours.len() {
         let c = contours.get(i)?;
-        raw_rects.push(imgproc::bounding_rect(&c)?);
+        raw_rects.push(bounding_rect(&c)?);
     }
 
     let hierarchy_vec = hierarchy.data_typed::<Vec4i>()?.to_vec();
