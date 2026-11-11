@@ -15,6 +15,12 @@ Wayland-first implementation that targets wlroots-based compositors
 3. When one hint remains the cursor warps to its centre, and activates LMB only if `click_after_warp = true` (default)   
 4. Press **Escape** to cancel, **Backspace** to undo a character
 
+Labels use distinct letters from `hint_chars` (case-insensitive, configured order).
+All labels have the shortest uniform length that covers every target: with 26
+letters, up to 26 targets use one character, up to 676 use two, and denser screens
+use three or more. Targets are never dropped because the two-character space is
+exhausted. Invalid alphabets fall back to a–z.
+
 Hint targets are selected by `hint_source`:
 
 - `static` (default): fixed interval x,y placement across the monitor

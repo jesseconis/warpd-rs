@@ -47,32 +47,135 @@ pub enum HintResult {
 // Hint generation
 // ---------------------------------------------------------------------------
 
-/// Generate hint labels from a set of characters.
-/// With N chars we can produce N single-char labels and N*N two-char labels.
-/// We generate enough labels to cover `count` grid cells, preferring short labels.
-pub fn generate_labels(chars: &str, count: usize) -> Vec<String> {
-    let chars: Vec<char> = chars.chars().collect();
-    let mut labels = Vec::with_capacity(count);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
 
-    // Single-character labels first
-    for &c in &chars {
-        labels.push(c.to_string());
-        if labels.len() >= count {
-            return labels;
-        }
-    }
-
-    // Two-character labels
-    for &a in &chars {
-        for &b in &chars {
-            labels.push(format!("{a}{b}"));
-            if labels.len() >= count {
-                return labels;
+    #[test]
+    fn labels_cover_capacity_boundaries_without_ambiguous_prefixes() {
+        for count in [0, 1, 26, 27, 676, 677, 702, 703, 1604] {
+            let labels = generate_labels("abcdefghijklmnopqrstuvwxyz", count);
+            assert_eq!(labels.len(), count, "target count {count}");
+            assert_eq!(labels.iter().collect::<HashSet<_>>().len(), count);
+            for (i, label) in labels.iter().enumerate() {
+                assert!(
+                    !labels
+                        .iter()
+                        .enumerate()
+                        .any(|(j, other)| { i != j && other.starts_with(label) }),
+                    "ambiguous prefix: {label}"
+                );
             }
         }
     }
 
-    labels
+    #[test]
+    fn labels_preserve_alphabet_order_and_extend_to_any_required_length() {
+        assert_eq!(generate_labels("ba", 3), ["bb", "ba", "ab"]);
+        let labels = generate_labels("ba", 17);
+        assert_eq!(labels.len(), 17);
+        assert!(labels.iter().all(|label| label.len() == 5));
+        assert_eq!(labels[0], "bbbbb");
+        assert_eq!(labels[16], "abbbb");
+    }
+
+    #[test]
+    fn labels_normalize_unsupported_or_duplicate_characters() {
+        assert_eq!(generate_labels("Bba!éA", 3), ["bb", "ba", "ab"]);
+        for alphabet in ["", "!é", "a", "AA"] {
+            let labels = generate_labels(alphabet, 27);
+            assert_eq!(labels.len(), 27);
+            assert_eq!(labels.iter().collect::<HashSet<_>>().len(), 27);
+            assert!(labels
+                .iter()
+                .all(|label| label.chars().all(|ch| ch.is_ascii_lowercase())));
+        }
+        assert_eq!(generate_labels("x", 1), ["x"]);
+    }
+
+    #[test]
+    fn every_detected_area_gets_a_selectable_hint() {
+        // The reported capture retained 1,604 areas; the old generator only
+        // supplied 702 labels, silently truncating the contour-ordered areas.
+        let areas: Vec<_> = (0..1604)
+            .map(|i| TargetArea {
+                x: i * 30,
+                y: 0,
+                w: 20,
+                h: 20,
+            })
+            .collect();
+        let hints = generate_hints_from_areas(&Config::default(), &areas);
+        assert_eq!(hints.len(), areas.len());
+        for hint in &hints {
+            let mut typed = String::new();
+            let mut selected = None;
+            for ch in hint.label.chars() {
+                let event = KeyEvent {
+                    key: 0,
+                    sym: ch as u32,
+                    state: KeyState::Pressed,
+                    utf8: Some(ch.to_string()),
+                };
+                if let HintResult::Selected { x, y } = process_key(&event, &hints, &mut typed) {
+                    selected = Some((x, y));
+                    break;
+                }
+            }
+            assert_eq!(
+                selected,
+                Some((
+                    hint.x as f64 + hint.w as f64 / 2.0,
+                    hint.y as f64 + hint.h as f64 / 2.0
+                ))
+            );
+        }
+    }
+}
+
+/// Generate enough unique, prefix-free labels for every target.
+/// Use the shortest uniform length that fits `count`, extending beyond two
+/// characters on dense screens. Mixing lengths would make short labels prefixes
+/// of longer labels, preventing the short hints from being uniquely selected.
+pub fn generate_labels(chars: &str, count: usize) -> Vec<String> {
+    if count == 0 {
+        return Vec::new();
+    }
+
+    // Match keysym_to_char's supported alphabet and preserve configured order.
+    let mut alphabet = Vec::new();
+    for ch in chars.chars().filter(char::is_ascii_alphabetic) {
+        let ch = ch.to_ascii_lowercase();
+        if !alphabet.contains(&ch) {
+            alphabet.push(ch);
+        }
+    }
+    if alphabet.is_empty() || (alphabet.len() == 1 && count > 1) {
+        log::warn!(
+            "hint_chars needs at least two distinct letters for multiple targets; using a-z"
+        );
+        alphabet = ('a'..='z').collect();
+    }
+
+    let radix = alphabet.len();
+    let mut width = 1;
+    let mut capacity = radix;
+    while capacity < count {
+        width += 1;
+        capacity = capacity.saturating_mul(radix);
+    }
+
+    (0..count)
+        .map(|mut index| {
+            let mut label = vec![' '; width];
+            for ch in label.iter_mut().rev() {
+                *ch = alphabet[index % radix];
+                index /= radix;
+            }
+            label.into_iter().collect()
+        })
+        .collect()
 }
 
 /// Generate the grid of hints that covers the monitor.
