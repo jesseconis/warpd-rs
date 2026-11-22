@@ -25,6 +25,13 @@ use wayland_client::protocol::wl_shm;
 
 static DEBUG_DUMP_DONE: AtomicBool = AtomicBool::new(false);
 
+const MIN_RECT_HEIGHT: f64 = 3.0;
+const MIN_RECT_WIDTH: f64 = 7.0;
+const MAX_RECT_HEIGHT: f64 = 72.0;
+const MAX_RECT_WIDTH: f64 = 500.0;
+const CANNY_LOW_THRESHOLD: f64 = 50.0;
+const CANNY_HIGH_THRESHOLD: f64 = 160.0;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -38,6 +45,157 @@ mod tests {
             Point::new(10, 40),
         ]);
         assert_eq!(bounding_rect(&contour)?, Rect::new(10, 20, 21, 21));
+        Ok(())
+    }
+
+    #[test]
+    fn centered_child_is_kept_when_outer_container_is_filtered_by_size() {
+        // Simulates a tall or wide outlined button whose outer border and inner hole
+        // both exceed MAX_RECT_HEIGHT, with a single centered label inside.
+        // Hierarchy format: [next, prev, first_child, parent]
+        let rects = vec![
+            LogicalRect {
+                x: 100.0,
+                y: 100.0,
+                w: 160.0,
+                h: 90.0, // outer border (filtered: h >= MAX_RECT_HEIGHT)
+            },
+            LogicalRect {
+                x: 104.0,
+                y: 104.0,
+                w: 152.0,
+                h: 82.0, // inner hole (filtered: h >= MAX_RECT_HEIGHT)
+            },
+            LogicalRect {
+                x: 135.0,
+                y: 138.0,
+                w: 90.0,
+                h: 14.0, // centered label (must be kept!)
+            },
+        ];
+        let hierarchy = vec![
+            Vec4i::from([-1, -1, 1, -1]),
+            Vec4i::from([-1, -1, 2, 0]),
+            Vec4i::from([-1, -1, -1, 1]),
+        ];
+
+        let filtered = filter_rects(&rects, &hierarchy);
+        assert_eq!(filtered, vec![true, true, false]);
+    }
+
+    #[test]
+    fn outlined_button_within_size_bounds_keeps_single_hint() {
+        // Simulates a ~52px-tall outlined button (like Chrome's "Advanced" button at 1440p):
+        // outer border is kept, inner border hole and centered text are deduplicated.
+        let rects = vec![
+            LogicalRect {
+                x: 100.0,
+                y: 100.0,
+                w: 140.0,
+                h: 52.0, // outer border (kept)
+            },
+            LogicalRect {
+                x: 104.0,
+                y: 104.0,
+                w: 132.0,
+                h: 44.0, // inner hole (deduplicated against outer)
+            },
+            LogicalRect {
+                x: 125.0,
+                y: 119.0,
+                w: 90.0,
+                h: 14.0, // centered label (deduplicated against outer)
+            },
+        ];
+        let hierarchy = vec![
+            Vec4i::from([-1, -1, 1, -1]),
+            Vec4i::from([-1, -1, 2, 0]),
+            Vec4i::from([-1, -1, -1, 1]),
+        ];
+
+        let filtered = filter_rects(&rects, &hierarchy);
+        assert_eq!(filtered, vec![false, true, true]);
+    }
+
+    #[test]
+    fn small_square_icon_deduplicates_nested_details() {
+        let rects = vec![
+            LogicalRect {
+                x: 10.0,
+                y: 10.0,
+                w: 28.0,
+                h: 28.0, // outer icon (kept)
+            },
+            LogicalRect {
+                x: 13.0,
+                y: 13.0,
+                w: 22.0,
+                h: 22.0, // inner hole (filtered)
+            },
+            LogicalRect {
+                x: 22.0,
+                y: 15.0,
+                w: 10.0,
+                h: 10.0, // off-center detail inside small square icon (filtered)
+            },
+        ];
+        let hierarchy = vec![
+            Vec4i::from([-1, -1, 1, -1]),
+            Vec4i::from([-1, -1, 2, 0]),
+            Vec4i::from([-1, -1, -1, 1]),
+        ];
+
+        let filtered = filter_rects(&rects, &hierarchy);
+        assert_eq!(filtered, vec![false, true, true]);
+    }
+
+    #[test]
+    fn off_center_children_inside_kept_bar_are_preserved() {
+        let rects = vec![
+            LogicalRect {
+                x: 0.0,
+                y: 0.0,
+                w: 400.0,
+                h: 40.0, // bar (kept)
+            },
+            LogicalRect {
+                x: 10.0,
+                y: 10.0,
+                w: 60.0,
+                h: 20.0, // left button (kept)
+            },
+            LogicalRect {
+                x: 320.0,
+                y: 10.0,
+                w: 60.0,
+                h: 20.0, // right button (kept)
+            },
+        ];
+        let hierarchy = vec![
+            Vec4i::from([-1, -1, 1, -1]),
+            Vec4i::from([2, -1, -1, 0]),
+            Vec4i::from([-1, 1, -1, 0]),
+        ];
+
+        let filtered = filter_rects(&rects, &hierarchy);
+        assert_eq!(filtered, vec![false, false, false]);
+    }
+
+    #[test]
+    fn argb8888_preserves_blue_channel_in_grayscale() -> Result<()> {
+        // Pure blue pixel in little-endian ARGB8888: [B=255, G=0, R=0, A=255]
+        let frame = CapturedFrame {
+            width: 1,
+            height: 1,
+            stride: 4,
+            format: wl_shm::Format::Argb8888,
+            y_invert: false,
+            data: vec![255, 0, 0, 255],
+        };
+        let gray = grayscale_from_frame(&frame)?;
+        let val = *gray.at_2d::<u8>(0, 0)?;
+        // (29 * 255) >> 8 == 28; previously returned 0 because px[1] (green) was used twice.
+        assert_eq!(val, 28);
         Ok(())
     }
 }
@@ -59,12 +217,10 @@ fn grayscale_from_frame(frame: &CapturedFrame) -> Result<Mat> {
             let i = row + x * 4;
             let px = &frame.data[i..i + 4];
 
-            // Mirror wl-kbptr's channel selection before BGR->gray conversion:
-            //   ARGB/XRGB: channels [1,1,2]
-            //   ABGR/XBGR: channels [2,1,0]
-            // For other 32-bit formats, fall back to natural BGR order.
+            // Convert 32-bit wl_shm pixel formats to (B, G, R) for grayscale luminance.
+            // On little-endian, ARGB8888/XRGB8888 bytes are laid out as [B, G, R, A/X].
             let (b, g, r) = match frame.format {
-                wl_shm::Format::Argb8888 | wl_shm::Format::Xrgb8888 => (px[1], px[1], px[2]),
+                wl_shm::Format::Argb8888 | wl_shm::Format::Xrgb8888 => (px[0], px[1], px[2]),
                 wl_shm::Format::Abgr8888 | wl_shm::Format::Xbgr8888 => (px[2], px[1], px[0]),
                 wl_shm::Format::Rgba8888 | wl_shm::Format::Rgbx8888 => (px[2], px[1], px[0]),
                 wl_shm::Format::Bgra8888 | wl_shm::Format::Bgrx8888 => (px[0], px[1], px[2]),
@@ -149,51 +305,67 @@ struct LogicalRect {
     h: f64,
 }
 
+fn is_outside_size_bounds(rect: LogicalRect) -> bool {
+    rect.h >= MAX_RECT_HEIGHT
+        || rect.w >= MAX_RECT_WIDTH
+        || rect.h <= MIN_RECT_HEIGHT
+        || rect.w <= MIN_RECT_WIDTH
+}
+
 fn filter_rects(rects: &[LogicalRect], hierarchy: &[Vec4i]) -> Vec<bool> {
-    let mut filtered = vec![false; rects.len()];
+    let mut filtered: Vec<bool> = rects.iter().copied().map(is_outside_size_bounds).collect();
+    let mut visited = vec![false; rects.len()];
 
-    for (i, rect) in rects.iter().enumerate() {
-        if rect.h >= 50.0 || rect.w >= 500.0 || rect.h <= 3.0 || rect.w <= 7.0 {
-            filtered[i] = true;
-        }
-    }
-
-    let mut stack: Vec<usize> = hierarchy
+    // Walk OpenCV's RETR_TREE hierarchy top-down ([next, prev, first_child, parent]).
+    // Deduplicate children only against the nearest *kept* ancestor so that when an
+    // outer container (e.g. a tall button or wide input) is filtered out by size,
+    // its centered label or icon is preserved instead of disappearing too.
+    let mut stack: Vec<(usize, Option<usize>)> = hierarchy
         .iter()
         .enumerate()
-        .filter_map(|(i, h)| if h[3] >= 0 { Some(i) } else { None })
+        .take(rects.len())
+        .filter_map(|(i, h)| if h[3] < 0 { Some((i, None)) } else { None })
         .collect();
 
-    while let Some(i) = stack.pop() {
-        if !filtered[i] {
-            let parent_i = hierarchy[i][3] as usize;
+    while let Some((i, kept_ancestor)) = stack.pop() {
+        if visited[i] {
+            continue;
+        }
+        visited[i] = true;
+
+        let has_parent = hierarchy[i][3] >= 0;
+        if !filtered[i] && has_parent {
             let rect = rects[i];
             if rect.h <= 6.0 {
                 filtered[i] = true;
-            } else {
-                let parent = rects[parent_i];
-
+            } else if let Some(ancestor_i) = kept_ancestor {
+                let ancestor = rects[ancestor_i];
                 let center_x = rect.x + rect.w / 2.0;
                 let center_y = rect.y + rect.h / 2.0;
-                let parent_center_x = parent.x + parent.w / 2.0;
-                let parent_center_y = parent.y + parent.h / 2.0;
+                let ancestor_center_x = ancestor.x + ancestor.w / 2.0;
+                let ancestor_center_y = ancestor.y + ancestor.h / 2.0;
 
-                // Do not inherit parent filtering: active-window outlines are often
-                // huge contours, and inheriting that filter hides most child targets.
-                if (center_x - parent_center_x).abs() < 8.0
-                    && (center_y - parent_center_y).abs() < 8.0
+                if (center_x - ancestor_center_x).abs() < 8.0
+                    && (center_y - ancestor_center_y).abs() < 8.0
                 {
                     filtered[i] = true;
-                } else if (parent.h - parent.w).abs() < 5.0 && parent.h < 40.0 && parent.w < 40.0 {
+                } else if (ancestor.h - ancestor.w).abs() < 5.0
+                    && ancestor.h < 40.0
+                    && ancestor.w < 40.0
+                {
                     filtered[i] = true;
                 }
             }
         }
 
-        let mut child = hierarchy[i][0];
+        let next_kept_ancestor = if !filtered[i] { Some(i) } else { kept_ancestor };
+        let mut child = hierarchy[i][2];
         while child >= 0 {
-            stack.push(child as usize);
-            child = hierarchy[child as usize][2];
+            let child_idx = child as usize;
+            if child_idx < rects.len() && !visited[child_idx] {
+                stack.push((child_idx, next_kept_ancestor));
+            }
+            child = hierarchy[child_idx][0];
         }
     }
 
@@ -201,10 +373,7 @@ fn filter_rects(rects: &[LogicalRect], hierarchy: &[Vec4i]) -> Vec<bool> {
 }
 
 fn filter_rects_size_only(rects: &[LogicalRect]) -> Vec<bool> {
-    rects
-        .iter()
-        .map(|r| r.h >= 50.0 || r.w >= 500.0 || r.h <= 3.0 || r.w <= 7.0)
-        .collect()
+    rects.iter().copied().map(is_outside_size_bounds).collect()
 }
 
 fn kept_split_counts(rects: &[LogicalRect], filtered: &[bool], split_x: f64) -> (usize, usize) {
@@ -381,7 +550,14 @@ pub fn detect_target_areas(frame: &CapturedFrame, monitor: &Monitor) -> Result<V
     let kx = (3.5 * scale).round().max(1.0) as i32;
 
     let mut edges = Mat::default();
-    imgproc::canny(&transformed, &mut edges, 70.0, 220.0, 3, false)?;
+    imgproc::canny(
+        &transformed,
+        &mut edges,
+        CANNY_LOW_THRESHOLD,
+        CANNY_HIGH_THRESHOLD,
+        3,
+        false,
+    )?;
 
     let kernel = imgproc::get_structuring_element(
         imgproc::MORPH_RECT,
