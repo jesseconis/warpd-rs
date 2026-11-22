@@ -67,7 +67,7 @@ bump patch='false' minor='false' major='false' set_version='' no_commit='false' 
     CURRENT="$(just version)"
     NEXT="$(just _resolve-version "{{patch}}" "{{minor}}" "{{major}}" "{{set_version}}")"
     TAG="v${NEXT}"
-    MSG="chore💤: release warpd-rs ${TAG}"
+    MSG="🚀🔖 release warpd-rs ${TAG}"
 
     if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
         echo "error: tag ${TAG} already exists locally" >&2
@@ -134,7 +134,7 @@ tag push='false' dry_run='false':
 
     VERSION="$(just version)"
     TAG="v${VERSION}"
-    MSG="chore💤: release warpd-rs ${TAG}"
+    MSG="🔖 warpd-rs ${TAG}"
 
     if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
         echo "error: tag ${TAG} already exists locally" >&2
@@ -261,7 +261,7 @@ release patch='false' minor='false' major='false' set_version='' draft='false' p
         fi
         echo "[dry-run] 2. just bump --version ${NEXT}"
         echo "[dry-run] 3. just build-bins  -> dist/warpd-rs-${TAG}, dist/warpd-rs-nocv-${TAG}"
-        echo "[dry-run] 4. just tag         -> git tag -s ${TAG} -m \"chore💤: release warpd-rs ${TAG}\""
+        echo "[dry-run] 4. just tag         -> git tag -s ${TAG} -m \"🔖 warpd-rs ${TAG}\""
         echo "[dry-run] 5. just push-release -> git push origin HEAD ${TAG}"
         GH_FLAGS=""
         [[ "{{draft}}" == "true" ]] && GH_FLAGS+=" --draft"
