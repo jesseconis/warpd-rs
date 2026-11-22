@@ -13,6 +13,27 @@ check:
     cargo test --features opencv
     cargo test --no-default-features
 
+# Install web SPA + static docs dependencies
+site-install:
+    npm --prefix site install
+
+# Run local dev server for the SPA + generated static docs
+site-dev:
+    npm --prefix site run dev
+
+# Build the SPA and generate static docs from README.md & docs/ into site/dist/
+site-build:
+    npm --prefix site run build
+    npm --prefix site run typecheck
+
+# Validate Cloudflare Workers deployment without uploading
+site-deploy-dry-run: site-build
+    cd site && npx cf deploy ./dist --dry-run
+
+# Build and deploy SPA + docs to warpd.jesse.rs via Cloudflare Workers Static Assets
+site-deploy: site-build
+    cd site && npx cf deploy ./dist
+
 # Build release binaries (with and without opencv) into dist/
 build-bins:
     #!/usr/bin/env bash

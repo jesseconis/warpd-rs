@@ -1,0 +1,66 @@
+name: Deploy Site & Docs (warpd.jesse.rs)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "site/**"
+      - "README.md"
+      - "docs/**"
+      - "config.example.toml"
+      - "Cargo.toml"
+      - ".github/workflows/deploy-site.yml"
+  pull_request:
+    paths:
+      - "site/**"
+      - "README.md"
+      - "docs/**"
+      - "config.example.toml"
+      - "Cargo.toml"
+      - ".github/workflows/deploy-site.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    name: Build SPA + Docs & Deploy to Cloudflare Workers
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: site
+    env:
+      CF_SEND_TELEMETRY: "false"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build SPA and static docs
+        run: npm run build
+
+      - name: Typecheck SPA and Cloudflare config
+        run: npm run typecheck
+
+      - name: Validate Cloudflare Workers deployment (dry-run)
+        run: npx cf deploy ./dist --dry-run
+
+      - name: Deploy to warpd.jesse.rs
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        run: npx cf deploy ./dist
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

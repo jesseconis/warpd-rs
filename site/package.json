@@ -1,0 +1,31 @@
+{
+  "name": "warpd-rs-site",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "sync:content": "node scripts/sync-content.mjs",
+    "build:docs": "node scripts/build-docs.mjs",
+    "dev": "npm run sync:content && npm run build:docs -- --out public && vite",
+    "build": "npm run sync:content && vite build && npm run build:docs -- --out dist",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "deploy:dry-run": "cf deploy ./dist --dry-run",
+    "deploy": "cf deploy ./dist"
+  },
+  "dependencies": {
+    "lucide-react": "^0.511.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^4.5.0",
+    "cf": "latest",
+    "highlight.js": "^11.11.1",
+    "marked": "^15.0.12",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}
